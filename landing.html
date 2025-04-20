@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI News Summarizer - Setup Your Provider</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            color: #1a1a1a;
+        }
+
+        .container {
+            background: white;
+            padding: 3rem;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            max-width: 800px;
+            width: 100%;
+            text-align: center;
+        }
+
+        .header {
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(45deg, #4F46E5, #06B6D4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            color: #666;
+        }
+
+        .value-prop {
+            background: #f8fafc;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 2rem 0;
+            text-align: left;
+        }
+
+        .value-prop h2 {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+            color: #1e293b;
+        }
+
+        .value-prop ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .value-prop li {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.8rem;
+            color: #475569;
+        }
+
+        .value-prop li::before {
+            content: "✓";
+            color: #10b981;
+            font-weight: bold;
+            margin-right: 0.8rem;
+        }
+
+        .provider-list {
+            display: grid;
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .provider-option {
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .provider-option:hover {
+            border-color: #4F46E5;
+            transform: translateY(-2px);
+        }
+
+        .provider-option.selected {
+            border-color: #4F46E5;
+            background: #f8fafc;
+        }
+
+        .provider-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .provider-name {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .signup-link {
+            display: inline-block;
+            background: #4F46E5;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: background 0.3s ease;
+        }
+
+        .signup-link:hover {
+            background: #4338ca;
+        }
+
+        .provider-description {
+            color: #64748b;
+            margin-bottom: 1rem;
+        }
+
+        .api-fields {
+            display: none;
+            margin-top: 1rem;
+        }
+
+        .provider-option.selected .api-fields {
+            display: block;
+        }
+
+        .input-group {
+            margin-bottom: 1rem;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #334155;
+        }
+
+        .input-group input, .input-group select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+
+        .install-button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 2rem;
+            transition: all 0.3s ease;
+            min-width: 200px;
+        }
+
+        .install-button:hover {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+
+        .install-button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .success-message {
+            display: none;
+            background: #ecfdf5;
+            color: #047857;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+            text-align: center;
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                padding: 1.5rem;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>AI News Summarizer</h1>
+            <p>Your personal AI-powered news digest assistant</p>
+        </div>
+
+        <div class="value-prop">
+            <h2>Why Choose Our Summarizer?</h2>
+            <ul>
+                <li>Instantly summarize news articles from Google News</li>
+                <li>Choose from leading AI providers for best results</li>
+                <li>Works offline after installation</li>
+                <li>Seamless sharing from your mobile device</li>
+            </ul>
+        </div>
+
+        <h2 style="margin-bottom: 1rem; color: #1e293b;">Choose Your AI Provider</h2>
+        <p style="color: #64748b; margin-bottom: 2rem;">Select an AI provider and get your API key to start summarizing articles</p>
+
+        <div class="provider-list">
+            <div class="provider-option" data-provider="openai">
+                <div class="provider-header">
+                    <span class="provider-name">OpenAI</span>
+                    <a href="https://platform.openai.com/signup" target="_blank" class="signup-link">Get API Key</a>
+                </div>
+                <div class="provider-description">
+                    Use GPT-4 or GPT-3.5-turbo for high-quality summaries. Best for comprehensive and accurate results.
+                </div>
+                <div class="api-fields">
+                    <div class="input-group">
+                        <label for="openai-key">API Key</label>
+                        <input type="password" id="openai-key" placeholder="sk-...">
+                    </div>
+                    <div class="input-group">
+                        <label for="openai-model">Model</label>
+                        <select id="openai-model">
+                            <option value="gpt-4">GPT-4 (Most Accurate)</option>
+                            <option value="gpt-3.5-turbo" selected>GPT-3.5-Turbo (Faster)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="provider-option" data-provider="anthropic">
+                <div class="provider-header">
+                    <span class="provider-name">Anthropic Claude</span>
+                    <a href="https://console.anthropic.com/signup" target="_blank" class="signup-link">Get API Key</a>
+                </div>
+                <div class="provider-description">
+                    Use Claude 3 for articulate and nuanced summaries. Excellent for understanding complex topics.
+                </div>
+                <div class="api-fields">
+                    <div class="input-group">
+                        <label for="anthropic-key">API Key</label>
+                        <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+                    </div>
+                    <div class="input-group">
+                        <label for="anthropic-model">Model</label>
+                        <select id="anthropic-model">
+                            <option value="claude-3-opus-20240229">Claude 3 Opus (Most Capable)</option>
+                            <option value="claude-3-sonnet-20240229" selected>Claude 3 Sonnet (Balanced)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="provider-option" data-provider="deepseek">
+                <div class="provider-header">
+                    <span class="provider-name">DeepSeek</span>
+                    <a href="https://platform.deepseek.com/signup" target="_blank" class="signup-link">Get API Key</a>
+                </div>
+                <div class="provider-description">
+                    Cost-effective open source alternative for quick summaries. Good balance of quality and price.
+                </div>
+                <div class="api-fields">
+                    <div class="input-group">
+                        <label for="deepseek-key">API Key</label>
+                        <input type="password" id="deepseek-key" placeholder="API Key...">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="install-button" id="installButton" disabled>Configure & Install PWA</button>
+        <div class="success-message" id="successMessage">
+            ✓ Configuration saved successfully! You can now share articles from Google News to get AI summaries.
+        </div>
+    </div>
+
+    <script>
+        let selectedProvider = null;
+
+        // Handle provider selection
+        document.querySelectorAll('.provider-option').forEach(option => {
+            option.addEventListener('click', () => {
+                // Clear previous selection
+                document.querySelectorAll('.provider-option').forEach(o => o.classList.remove('selected'));
+                
+                // Select new provider
+                option.classList.add('selected');
+                selectedProvider = option.dataset.provider;
+                
+                // Enable install button if API key is filled
+                const apiKeyInput = option.querySelector('input[type="password"]');
+                document.getElementById('installButton').disabled = !apiKeyInput.value;
+                
+                apiKeyInput.addEventListener('input', () => {
+                    document.getElementById('installButton').disabled = !apiKeyInput.value;
+                });
+            });
+        });
+
+        // Handle installation
+        document.getElementById('installButton').addEventListener('click', async () => {
+            if (!selectedProvider) return;
+
+            const providerOption = document.querySelector(`[data-provider="${selectedProvider}"]`);
+            const apiKey = providerOption.querySelector('input[type="password"]').value;
+            const modelSelect = providerOption.querySelector('select');
+            const model = modelSelect ? modelSelect.value : null;
+
+            // Create configuration
+            const config = {
+                provider: selectedProvider,
+                apiKey: apiKey,
+                model: model
+            };
+
+            // Store configuration in localStorage
+            localStorage.setItem('ai_summarizer_config', JSON.stringify(config));
+
+            // Redirect to main app
+            document.getElementById('successMessage').style.display = 'block';
+            document.getElementById('installButton').disabled = true;
+            document.getElementById('installButton').textContent = 'Configuration Saved!';
+
+            // Redirect to main app after short delay
+            setTimeout(() => {
+                window.location.href = '/index.html';
+            }, 2000);
+        });
+    </script>
+</body>
+</html>
