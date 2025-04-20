@@ -12,6 +12,8 @@
       padding: 2rem;
       line-height: 1.4;
       text-align: center;
+      max-width: 800px;
+      margin: 0 auto;
     }
     h1 {
       color: #1a1a1a;
@@ -55,6 +57,99 @@
       background: #6b7280;
       color: white;
     }
+    .queue-mode {
+      margin: 2rem 0;
+      padding: 1rem;
+      background: #f8fafc;
+      border-radius: 8px;
+    }
+    .queue-mode label {
+      display: inline-block;
+      margin-bottom: 1rem;
+      cursor: pointer;
+    }
+    .queue-mode input[type="checkbox"] {
+      margin-right: 0.5rem;
+      transform: scale(1.2);
+    }
+    #summarizeQueueBtn {
+      background: #10b981;
+      color: white;
+      border: none;
+      padding: 1rem 2rem;
+      border-radius: 8px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    #summarizeQueueBtn:hover {
+      background: #059669;
+    }
+    #articleQueue {
+      text-align: left;
+      margin: 2rem 0;
+    }
+    .article-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem;
+      margin: 0.5rem 0;
+      background: #f8fafc;
+      border-radius: 8px;
+      word-break: break-all;
+    }
+    .article-item button {
+      background: #ef4444;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-left: 1rem;
+    }
+    .article-item button:hover {
+      background: #dc2626;
+    }
+    .status-message {
+      margin: 1rem 0;
+      padding: 1rem;
+      border-radius: 8px;
+      display: none;
+    }
+    .status-message.success {
+      background: #ecfdf5;
+      color: #047857;
+    }
+    .status-message.error {
+      background: #fef2f2;
+      color: #991b1b;
+    }
+    #batchResults {
+      text-align: left;
+      margin-top: 2rem;
+    }
+    .summary-item {
+      margin: 1.5rem 0;
+      padding: 1.5rem;
+      background: #f8fafc;
+      border-radius: 8px;
+    }
+    .summary-item h3 {
+      margin: 0 0 1rem 0;
+      color: #1e293b;
+    }
+    .summary-item a {
+      font-size: 0.9rem;
+      color: #64748b;
+      word-break: break-all;
+    }
+    .summary-item pre {
+      white-space: pre-wrap;
+      margin: 1rem 0;
+      font-family: inherit;
+    }
     @media (max-width: 640px) {
       .nav-links {
         flex-direction: column;
@@ -66,17 +161,131 @@
 <body>
   <h1>Summarise with AI</h1>
   <p>This tiny PWA lets you share news articles from Google News /
-     Discover and get a concise AI summary.</p>
+     Discover and get concise AI summaries.</p>
   
   <div class="nav-links">
     <a href="landing.html">Configure AI Provider</a>
     <a href="settings.html" class="secondary">Settings</a>
   </div>
 
+  <div class="queue-mode">
+    <label>
+      <input type="checkbox" id="queueModeToggle"> Queue Mode (for batch processing)
+    </label>
+    <div id="queueInfo" style="display:none;">
+      <p>Queue Mode is ON - Share articles to add them to the queue</p>
+      <button id="summarizeQueueBtn">
+        Summarize Queue (<span id="queueCount">0</span>)
+      </button>
+    </div>
+  </div>
+
+  <div id="statusMessage" class="status-message"></div>
+
+  <div id="articleQueue">
+    <!-- Queue items will be added here dynamically -->
+  </div>
+
+  <div id="batchResults">
+    <!-- Batch summaries will appear here -->
+  </div>
+
   <!-- Register service-worker and handle configuration -->
   <script>
+    // Helper functions for queue management
+    function getQueue() {
+      const queueData = localStorage.getItem('summarizer_queue');
+      return queueData ? JSON.parse(queueData) : { articles: [], queueMode: false, sessionId: null };
+    }
+
+    function saveQueue(queue) {
+      localStorage.setItem('summarizer_queue', JSON.stringify(queue));
+    }
+
+    function updateQueueUI() {
+      const queue = getQueue();
+      const queueElement = document.getElementById('articleQueue');
+      const queueCount = document.getElementById('queueCount');
+      const queueInfo = document.getElementById('queueInfo');
+      
+      queueCount.textContent = queue.articles.length;
+      queueElement.innerHTML = '';
+      
+      if (queue.articles.length > 0) {
+        queueInfo.style.display = 'block';
+        queue.articles.forEach((article, index) => {
+          const itemDiv = document.createElement('div');
+          itemDiv.className = 'article-item';
+          itemDiv.innerHTML = `
+            <span>${article.url}</span>
+            <button onclick="removeFromQueue(${index})">Remove</button>
+          `;
+          queueElement.appendChild(itemDiv);
+        });
+      } else {
+        queueInfo.style.display = queue.queueMode ? 'block' : 'none';
+      }
+    }
+
+    function removeFromQueue(index) {
+      const queue = getQueue();
+      queue.articles.splice(index, 1);
+      saveQueue(queue);
+      updateQueueUI();
+    }
+
+    function showStatus(message, type) {
+      const statusElement = document.getElementById('statusMessage');
+      statusElement.textContent = message;
+      statusElement.className = `status-message ${type}`;
+      statusElement.style.display = 'block';
+      setTimeout(() => {
+        statusElement.style.display = 'none';
+      }, 3000);
+    }
+
+    // Queue mode toggle
+    document.getElementById('queueModeToggle').addEventListener('change', (e) => {
+      const queue = getQueue();
+      queue.queueMode = e.target.checked;
+      if (queue.queueMode) {
+        queue.sessionId = Date.now().toString();
+      } else {
+        queue.sessionId = null;
+      }
+      saveQueue(queue);
+      updateQueueUI();
+    });
+
+    // Summarize queue button
+    document.getElementById('summarizeQueueBtn').addEventListener('click', async () => {
+      const queue = getQueue();
+      if (queue.articles.length === 0) {
+        showStatus('Queue is empty!', 'error');
+        return;
+      }
+
+      // Request summaries from service worker
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        showStatus('Processing articles...', 'success');
+        const response = await navigator.serviceWorker.controller.postMessage({
+          action: 'summarizeQueue',
+          articles: queue.articles
+        });
+      } else {
+        showStatus('Service worker not ready. Please refresh the page.', 'error');
+      }
+    });
+
+    // Service worker setup
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
+      navigator.serviceWorker.register('sw.js')
+        .then(registration => {
+          console.log('Service Worker registered with scope:', registration.scope);
+        })
+        .catch(error => {
+          console.error('Service Worker registration failed:', error);
+        });
       
       // Handle messages from service worker
       navigator.serviceWorker.addEventListener('message', event => {
@@ -89,6 +298,41 @@
               config: JSON.parse(config)
             });
           }
+        } else if (event.data.action === 'getQueueMode') {
+          // Send queue mode status to service worker
+          const queue = getQueue();
+          event.source.postMessage({
+            action: 'queueMode',
+            queueMode: queue.queueMode
+          });
+        } else if (event.data.action === 'articleQueued') {
+          // Article was added to queue by service worker
+          updateQueueUI();
+          showStatus('Article added to queue', 'success');
+        } else if (event.data.action === 'batchSummaryComplete') {
+          // Display batch summary results
+          const resultsDiv = document.getElementById('batchResults');
+          resultsDiv.innerHTML = '';
+          
+          if (event.data.results && event.data.results.length > 0) {
+            event.data.results.forEach((result, index) => {
+              const summaryDiv = document.createElement('div');
+              summaryDiv.className = 'summary-item';
+              summaryDiv.innerHTML = `
+                <h3>Article ${index + 1}</h3>
+                <a href="${result.url}" target="_blank">${result.url}</a>
+                <pre>${result.summary}</pre>
+              `;
+              resultsDiv.appendChild(summaryDiv);
+            });
+            
+            // Clear queue after successful processing
+            const queue = getQueue();
+            queue.articles = [];
+            saveQueue(queue);
+            updateQueueUI();
+            showStatus('All summaries generated successfully!', 'success');
+          }
         }
       });
       
@@ -96,6 +340,11 @@
       if (!localStorage.getItem('ai_summarizer_config')) {
         window.location.href = 'landing.html';
       }
+
+      // Initialize UI
+      const queue = getQueue();
+      document.getElementById('queueModeToggle').checked = queue.queueMode;
+      updateQueueUI();
     }
   </script>
 </body>
