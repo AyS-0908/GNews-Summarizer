@@ -268,7 +268,7 @@
       // Request summaries from service worker
       if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
         showStatus('Processing articles...', 'success');
-        const response = await navigator.serviceWorker.controller.postMessage({
+        navigator.serviceWorker.controller.postMessage({
           action: 'summarizeQueue',
           articles: queue.articles
         });
@@ -305,6 +305,16 @@
             action: 'queueMode',
             queueMode: queue.queueMode
           });
+        } else if (event.data.action === 'addToQueue') {
+          // Add article to queue when service worker requests it
+          const queue = getQueue();
+          queue.articles.push({
+            url: event.data.url,
+            timestamp: event.data.timestamp
+          });
+          saveQueue(queue);
+          updateQueueUI();
+          showStatus('Article added to queue', 'success');
         } else if (event.data.action === 'articleQueued') {
           // Article was added to queue by service worker
           updateQueueUI();
