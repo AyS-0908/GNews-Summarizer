@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI News Summarizer - Setup Your Provider</title>
     <link rel="icon" href="icon.png" type="image/png">
+    <link rel="manifest" href="manifest.json">
     <style>
         * {
             margin: 0;
@@ -307,6 +308,17 @@
 
     <script>
         let selectedProvider = null;
+
+        // Register service worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(registration => {
+                    console.log('Service Worker registered with scope:', registration.scope);
+                })
+                .catch(error => {
+                    console.error('Service Worker registration failed:', error);
+                });
+        }
 
         // Handle provider selection
         document.querySelectorAll('.provider-option').forEach(option => {
