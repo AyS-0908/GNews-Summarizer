@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Summarise with AI</title>
+  <link rel="manifest" href="/manifest.json">
+</head>
+<body>
+  <h1>Summarise with AI</h1>
+  <p>This tiny PWA lets you share news articles from Google News /
+     Discover and get a concise AI summary.</p>
+
+  <!-- Register service-worker -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
+  </script>
+</body>
+</html>
