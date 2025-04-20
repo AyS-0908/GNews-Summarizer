@@ -309,6 +309,37 @@
     <script>
         let selectedProvider = null;
 
+        // Check for existing configuration and pre-fill form
+        function loadExistingConfig() {
+            const existingConfig = localStorage.getItem('ai_summarizer_config');
+            if (existingConfig) {
+                const config = JSON.parse(existingConfig);
+                selectedProvider = config.provider;
+
+                // Select the correct provider option
+                const providerOption = document.querySelector(`[data-provider="${config.provider}"]`);
+                if (providerOption) {
+                    providerOption.classList.add('selected');
+                    
+                    // Pre-fill API key
+                    const apiKeyInput = providerOption.querySelector('input[type="password"]');
+                    if (apiKeyInput) {
+                        apiKeyInput.value = config.apiKey;
+                    }
+                    
+                    // Pre-select model if applicable
+                    const modelSelect = providerOption.querySelector('select');
+                    if (modelSelect && config.model) {
+                        modelSelect.value = config.model;
+                    }
+                    
+                    // Enable install button
+                    document.getElementById('installButton').disabled = false;
+                    document.getElementById('installButton').textContent = 'Update Configuration';
+                }
+            }
+        }
+
         // Register service worker
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js')
@@ -369,6 +400,9 @@
                 window.location.href = 'index.html';
             }, 2000);
         });
+
+        // Load existing configuration when page loads
+        window.addEventListener('load', loadExistingConfig);
     </script>
 </body>
 </html>
