@@ -205,6 +205,137 @@
             text-align: center;
         }
 
+        /* Modal styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+            position: relative;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-header h2 {
+            font-size: 1.5rem;
+            color: #1e293b;
+            margin: 0;
+            text-align: left;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: #64748b;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .modal-close:hover {
+            color: #1e293b;
+        }
+
+        .step-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .step-item {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            text-align: left;
+        }
+
+        .step-number {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: #4F46E5;
+            color: white;
+            border-radius: 50%;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-content h3 {
+            font-size: 1.1rem;
+            color: #1e293b;
+            margin: 0 0 0.5rem 0;
+        }
+
+        .step-content p {
+            color: #64748b;
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        .modal-footer {
+            margin-top: 2rem;
+            text-align: center;
+        }
+
+        .understand-button {
+            background: #4F46E5;
+            color: white;
+            border: none;
+            padding: 0.8rem 2rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .understand-button:hover {
+            background: #4338ca;
+        }
+
         @media (max-width: 640px) {
             .container {
                 padding: 1.5rem;
@@ -212,6 +343,14 @@
 
             .header h1 {
                 font-size: 2rem;
+            }
+
+            .modal-content {
+                padding: 1.5rem;
+            }
+
+            .step-item {
+                gap: 0.8rem;
             }
         }
     </style>
@@ -306,6 +445,49 @@
         </div>
     </div>
 
+    <!-- Installation Instructions Modal -->
+    <div class="modal-overlay" id="instructionsModal">
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <div class="modal-header">
+                <h2>🎉 Setup Complete!</h2>
+            </div>
+            <ul class="step-list">
+                <li class="step-item">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h3>Install the App</h3>
+                        <p>Click the three dots menu (⋮) in your browser → Select "Add to Home Screen" → Confirm installation</p>
+                    </div>
+                </li>
+                <li class="step-item">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h3>Open Google News</h3>
+                        <p>Browse any article in Google News or Google Discover that you want to summarize</p>
+                    </div>
+                </li>
+                <li class="step-item">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h3>Share the Article</h3>
+                        <p>Tap the Share button → Select "Summarise with AI" from the share menu</p>
+                    </div>
+                </li>
+                <li class="step-item">
+                    <div class="step-number">4</div>
+                    <div class="step-content">
+                        <h3>Get Your Summary</h3>
+                        <p>The AI will process the article and show you a concise summary in seconds!</p>
+                    </div>
+                </li>
+            </ul>
+            <div class="modal-footer">
+                <button class="understand-button" onclick="closeModalAndRedirect()">I Understand</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let selectedProvider = null;
 
@@ -338,6 +520,24 @@
                     document.getElementById('installButton').textContent = 'Update Configuration';
                 }
             }
+        }
+
+        // Show the instructions modal
+        function showModal() {
+            document.getElementById('instructionsModal').classList.add('active');
+        }
+
+        // Close the modal
+        function closeModal() {
+            document.getElementById('instructionsModal').classList.remove('active');
+        }
+
+        // Close modal and redirect to main app
+        function closeModalAndRedirect() {
+            closeModal();
+            setTimeout(() => {
+                window.location.href = 'index.html';
+            }, 500);
         }
 
         // Register service worker
@@ -390,15 +590,15 @@
             // Store configuration in localStorage
             localStorage.setItem('ai_summarizer_config', JSON.stringify(config));
 
-            // Redirect to main app
+            // Show success message and instructions modal
             document.getElementById('successMessage').style.display = 'block';
             document.getElementById('installButton').disabled = true;
             document.getElementById('installButton').textContent = 'Configuration Saved!';
 
-            // Redirect to main app after short delay
+            // Show the instructions modal after a short delay
             setTimeout(() => {
-                window.location.href = 'index.html';
-            }, 2000);
+                showModal();
+            }, 1000);
         });
 
         // Load existing configuration when page loads
