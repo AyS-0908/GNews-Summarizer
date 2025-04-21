@@ -21,6 +21,7 @@ The app includes ready-to-use code for:
 - Appears in Android's share sheet
 - Directly calls AI APIs for summarization
 - Displays AI-generated summaries with loading indicators
+- Smart caching system for instant loading of previously summarized articles
 - Batch processing mode for multiple articles
 - Visual progress tracking for batch summarization
 - Comprehensive error handling with retry capabilities
@@ -36,6 +37,7 @@ The app includes ready-to-use code for:
 2. Pick "Summarise with AI" from your share options
 3. The progress spinner appears while summarization is in progress
 4. View the summary when processing completes
+5. Future shares of the same article will load instantly from cache!
 
 ### Batch Mode
 1. Enable "Queue Mode" in the main interface
@@ -44,6 +46,14 @@ The app includes ready-to-use code for:
 4. Click "Summarize Queue" to process all queued articles
 5. Track progress with the visual progress bar
 6. View all summaries when processing completes
+7. Cached articles will show a "From Cache" indicator
+
+### Cache Management
+- Summaries are automatically cached for 24 hours
+- Cached summaries load instantly without using API credits
+- Look for the "From Cache" badge on summaries loaded from cache
+- Use the "Clear Cached Summaries" button to remove all cached content
+- Cache is used automatically for both single and batch modes
 
 ### Error Handling
 - Network issues: The app will automatically retry temporary network failures
@@ -74,6 +84,23 @@ The app implements multiple layers of security to protect your API keys:
 
 The security settings page shows the current encryption status and information about your configuration.
 
+## Performance Optimization
+
+The app uses several strategies to optimize performance:
+
+### Smart Caching
+- Summaries are cached locally using the Cache API
+- Reduces API usage and costs by avoiding duplicate requests
+- Dramatically improves load times for previously visited articles
+- Cache is automatically managed with version control
+- 24-hour expiration to ensure fresh content when needed
+
+### Resource Optimization
+- Static assets are cached for offline use
+- Service worker provides offline capabilities
+- Minimal network requests through cache-first strategy
+- Efficient error handling with exponential backoff retry
+
 ## Troubleshooting
 
 Common issues and solutions:
@@ -82,6 +109,7 @@ Common issues and solutions:
 - **"Rate Limit Exceeded"**: Wait a few minutes and try again, or switch to a different AI provider
 - **"Network Error"**: Check your internet connection and try again
 - **"Invalid URL"**: Ensure you're sharing from a supported news source
+- **Cache Issues**: Try clearing the cache using the "Clear Cached Summaries" button
 
 ## Future Plans
 
@@ -91,3 +119,4 @@ Features planned for upcoming versions:
 - Google Sheets integration for saving summaries
 - Customizable summary length options
 - Configuration for user-provided AI providers
+- Adjustable cache duration settings
