@@ -29,13 +29,15 @@ The app includes ready-to-use code for:
 - Intelligent error classification and user-friendly messages
 - 100% static, serverless architecture
 - No middleware required (direct API calls)
+- API key recovery system for changing devices
+- Real-time progress tracking with time estimation
 
 ## Using It
 
 ### Single Article Mode
 1. In Google News / Discover, share any article
 2. Pick "Summarise with AI" from your share options
-3. The progress spinner appears while summarization is in progress
+3. Track progress with detailed phase indicators (connecting, analyzing, finalizing)
 4. View the summary when processing completes
 5. Future shares of the same article will load instantly from cache!
 
@@ -44,7 +46,7 @@ The app includes ready-to-use code for:
 2. Share multiple articles from Google News / Discover
 3. Articles will be added to your queue instead of processed immediately
 4. Click "Summarize Queue" to process all queued articles
-5. Track progress with the visual progress bar
+5. Track progress with the visual progress bar and phase indicators
 6. View all summaries when processing completes
 7. Cached articles will show a "From Cache" indicator
 
@@ -56,10 +58,13 @@ The app includes ready-to-use code for:
 - Cache is used automatically for both single and batch modes
 
 ### Error Handling
-- Network issues: The app will automatically retry temporary network failures
+- Smart error classification: The app categorizes errors by type and severity
+- Network issues: The app automatically retries temporary network failures
 - API rate limits: Clearly identifies rate limit errors with helpful guidance
 - Authentication issues: Provides clear instructions when API keys are invalid
+- Detailed troubleshooting: Each error includes specific steps to resolve the issue
 - Retry capability: Failed summaries can be re-queued with a single click
+- Visual error indicators: Different styling for temporary, fixable, and critical errors
 
 ## API Key Security
 
@@ -75,6 +80,11 @@ The app implements multiple layers of security to protect your API keys:
   - Hardware details
 - The key can only be decrypted on the same device where it was configured
 - Even if your browser data is somehow accessed, the encrypted key is useless on other devices
+
+### API Key Recovery
+- Optional recovery PIN system for accessing your API key on new devices
+- Securely transfer your configuration when changing browsers or phones
+- No need to create new API keys when upgrading your device
 
 ### Security Benefits
 - Zero server dependency: No backend server needed
@@ -100,6 +110,7 @@ The app uses several strategies to optimize performance:
 - Service worker provides offline capabilities
 - Minimal network requests through cache-first strategy
 - Efficient error handling with exponential backoff retry
+- Client-side rate limiting to avoid API usage restrictions
 
 ## Troubleshooting
 
@@ -109,6 +120,8 @@ Common issues and solutions:
 - **"Rate Limit Exceeded"**: Wait a few minutes and try again, or switch to a different AI provider
 - **"Network Error"**: Check your internet connection and try again
 - **"Invalid URL"**: Ensure you're sharing from a supported news source
+- **"Content Access Restricted"**: The article may be behind a paywall or blocking AI access
+- **"Service Worker Inactive"**: Try refreshing the app or reinstalling it
 - **Cache Issues**: Try clearing the cache using the "Clear Cached Summaries" button
 
 ## Future Plans
