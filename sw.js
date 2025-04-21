@@ -218,6 +218,64 @@ self.addEventListener('message', async event => {
         }
       }
     }
+  } else if (messageAction === 'retryFailedSummary') {
+    // Handle retry requests for failed summaries
+    const url = event.data.url;
+    if (url) {
+      try {
+        // Clean up any existing progress tracking
+        cleanupProgressTracking(url);
+        
+        // Setup progress tracking for the retry
+        setupProgressTracking(url);
+        
+        // Get the configuration
+        const config = await getConfig();
+        if (!config) {
+          throw new SummarizerError('No AI provider configured', ErrorType.CONFIG_ERROR);
+        }
+        
+        // Attempt to get summary again
+        const summary = await getSummary(url, config);
+        
+        // Cache the result
+        await cacheSummary(url, summary);
+        
+        // Clean up progress tracking
+        cleanupProgressTracking(url);
+        
+        // Notify the client of success
+        if (event.source) {
+          event.source.postMessage({
+            action: 'retrySuccess',
+            url: url,
+            summary: summary
+          });
+        }
+      } catch (error) {
+        // Clean up progress tracking
+        cleanupProgressTracking(url);
+        
+        // Get detailed error information
+        const errorInfo = error instanceof SummarizerError 
+          ? getDetailedErrorInfo(error)
+          : {
+              message: `Error: ${error.message}`,
+              type: ErrorType.UNKNOWN,
+              severity: ErrorSeverity.CRITICAL,
+              troubleshooting: getTroubleshooting(ErrorType.UNKNOWN)
+            };
+        
+        // Notify the client of failure
+        if (event.source) {
+          event.source.postMessage({
+            action: 'retryFailure',
+            url: url,
+            error: errorInfo
+          });
+        }
+      }
+    }
   }
 });
 
@@ -484,23 +542,36 @@ async function handleApiSummarize(url) {
     // Setup progress tracking
     setupProgressTracking(url);
     
-    // Get the summary (this function updates progress internally)
-    const summary = await getSummary(url, config);
-    
-    // Cleanup progress tracking
-    cleanupProgressTracking(url);
-    
-    // Cache the result
-    await cacheSummary(url, summary);
-    
-    return new Response(JSON.stringify({ 
-      summary: summary, 
-      cached: false 
-    }), {
-      headers: { 'Content-Type': 'application/json' }
-    });
+    try {
+      // Get the summary (this function updates progress internally)
+      const summary = await getSummary(url, config);
+      
+      // Cache the result
+      await cacheSummary(url, summary);
+      
+      // Complete progress
+      updateProgress(url, 'complete', 100);
+      
+      // Clean up progress tracking after a short delay to allow clients to receive the final progress update
+      setTimeout(() => {
+        cleanupProgressTracking(url);
+      }, 1000);
+      
+      return new Response(JSON.stringify({ 
+        summary: summary, 
+        cached: false 
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      // Ensure progress tracking is cleaned up in case of error
+      cleanupProgressTracking(url);
+      
+      // Re-throw the error to be caught by the outer try/catch
+      throw error;
+    }
   } catch (error) {
-    // Cleanup progress tracking
+    // Ensure progress tracking is cleaned up
     cleanupProgressTracking(url);
     
     // Get detailed error information
@@ -550,6 +621,9 @@ async function clearSummaryCache() {
  * @param {string} url - The URL being summarized
  */
 function setupProgressTracking(url) {
+  // Make sure we don't have existing tracking for this URL
+  cleanupProgressTracking(url);
+  
   activeSummarizations[url] = {
     startTime: Date.now(),
     phase: 'initializing',
@@ -887,37 +961,63 @@ async function getConfig() {
   let config = null;
   
   if (clients.length > 0) {
-    await clients[0].postMessage({ action: 'getConfig' });
-    config = await new Promise(resolve => {
-      let handled = false;
-      
-      function handler(event) {
-        if (event.data.action === 'config' && !handled) {
-          handled = true;
-          self.removeEventListener('message', handler);
-          resolve(event.data.config);
+    // Implement adaptive timeout based on previous response times
+    const timeoutDuration = self._configFetchTimeoutMs || 2000; // Default: 2 seconds
+    const startTime = Date.now();
+    
+    try {
+      await clients[0].postMessage({ action: 'getConfig' });
+      config = await new Promise((resolve, reject) => {
+        let handled = false;
+        
+        function handler(event) {
+          if (event.data.action === 'config' && !handled) {
+            handled = true;
+            self.removeEventListener('message', handler);
+            resolve(event.data.config);
+          }
         }
+        
+        self.addEventListener('message', handler);
+        
+        // Implement adaptive timeout
+        setTimeout(() => {
+          if (!handled) {
+            handled = true;
+            self.removeEventListener('message', handler);
+            reject(new Error('Config request timed out'));
+          }
+        }, timeoutDuration);
+      });
+      
+      // Update timeout duration for next call based on this call's performance
+      // Use a moving average to smooth out variations
+      const elapsed = Date.now() - startTime;
+      self._configFetchTimeoutMs = Math.min(
+        5000, // Cap at 5 seconds max
+        Math.max(
+          1000, // Minimum 1 second
+          Math.round((self._configFetchTimeoutMs || 2000) * 0.7 + elapsed * 1.5) // Weighted average
+        )
+      );
+      
+      // Decrypt API key if configuration was received
+      if (config) {
+        config = decryptApiKey(config);
       }
       
-      self.addEventListener('message', handler);
-      
-      // Timeout after 2 seconds
-      setTimeout(() => {
-        if (!handled) {
-          handled = true;
-          self.removeEventListener('message', handler);
-          resolve(null);
-        }
-      }, 2000);
-    });
-    
-    // Decrypt API key if configuration was received
-    if (config) {
-      config = decryptApiKey(config);
+      return config;
+    } catch (error) {
+      console.error('Error getting configuration:', error);
+      // Increase timeout slightly if we timed out
+      if (error.message === 'Config request timed out') {
+        self._configFetchTimeoutMs = Math.min(5000, (self._configFetchTimeoutMs || 2000) * 1.5);
+      }
+      return null;
     }
   }
   
-  return config;
+  return null;
 }
 
 /**
@@ -929,32 +1029,57 @@ async function getQueueMode() {
   let queueMode = false;
   
   if (clients.length > 0) {
-    await clients[0].postMessage({ action: 'getQueueMode' });
-    queueMode = await new Promise(resolve => {
-      let handled = false;
-      
-      function handler(event) {
-        if (event.data.action === 'queueMode' && !handled) {
-          handled = true;
-          self.removeEventListener('message', handler);
-          resolve(event.data.queueMode);
+    // Use adaptive timeout similar to getConfig
+    const timeoutDuration = self._queueModeFetchTimeoutMs || 2000;
+    const startTime = Date.now();
+    
+    try {
+      await clients[0].postMessage({ action: 'getQueueMode' });
+      queueMode = await new Promise((resolve, reject) => {
+        let handled = false;
+        
+        function handler(event) {
+          if (event.data.action === 'queueMode' && !handled) {
+            handled = true;
+            self.removeEventListener('message', handler);
+            resolve(event.data.queueMode);
+          }
         }
+        
+        self.addEventListener('message', handler);
+        
+        // Adaptive timeout
+        setTimeout(() => {
+          if (!handled) {
+            handled = true;
+            self.removeEventListener('message', handler);
+            reject(new Error('Queue mode request timed out'));
+          }
+        }, timeoutDuration);
+      });
+      
+      // Update timeout for next call
+      const elapsed = Date.now() - startTime;
+      self._queueModeFetchTimeoutMs = Math.min(
+        5000,
+        Math.max(
+          1000,
+          Math.round((self._queueModeFetchTimeoutMs || 2000) * 0.7 + elapsed * 1.5)
+        )
+      );
+      
+      return queueMode;
+    } catch (error) {
+      console.error('Error getting queue mode:', error);
+      // Increase timeout slightly if we timed out
+      if (error.message === 'Queue mode request timed out') {
+        self._queueModeFetchTimeoutMs = Math.min(5000, (self._queueModeFetchTimeoutMs || 2000) * 1.5);
       }
-      
-      self.addEventListener('message', handler);
-      
-      // Timeout after 2 seconds and default to false
-      setTimeout(() => {
-        if (!handled) {
-          handled = true;
-          self.removeEventListener('message', handler);
-          resolve(false);
-        }
-      }, 2000);
-    });
+      return false;
+    }
   }
   
-  return queueMode;
+  return false;
 }
 
 /**
@@ -1657,6 +1782,9 @@ async function getSummary(url, config) {
     
     return summaryText;
   } catch (error) {
+    // Ensure progress tracking is cleaned up in case of error
+    updateProgress(url, 'error', 0);
+    
     // Classify and rethrow the error
     throw classifyError(error, aiResponse);
   }
@@ -1702,11 +1830,23 @@ async function processBatchArticles(articles) {
           );
         }
         
-        summary = await getSummary(article.url, config);
+        // Set up progress tracking for this URL
+        setupProgressTracking(article.url);
         
-        // Add a small delay between API calls to avoid overwhelming the provider
-        if (currentArticle < articles.length) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+        try {
+          summary = await getSummary(article.url, config);
+          
+          // Clean up progress tracking after successful summarization
+          cleanupProgressTracking(article.url);
+          
+          // Add a small delay between API calls to avoid overwhelming the provider
+          if (currentArticle < articles.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        } catch (error) {
+          // Ensure progress tracking is cleaned up if summarization fails
+          cleanupProgressTracking(article.url);
+          throw error;
         }
       }
       
@@ -1733,7 +1873,8 @@ async function processBatchArticles(articles) {
         success: false,
         errorType: errorInfo.type,
         severity: errorInfo.severity,
-        troubleshooting: errorInfo.troubleshooting
+        troubleshooting: errorInfo.troubleshooting,
+        retryable: errorInfo.severity === ErrorSeverity.TEMPORARY
       });
       
       // If rate limited, stop processing and return what we have so far
@@ -1963,6 +2104,8 @@ async function handleShare(request) {
           .progress-time{font-style:italic}
           .error-container{background:#fef2f2;border-radius:8px;padding:1rem;margin-top:2rem;text-align:left;display:none}
           .error-title{color:#991b1b;margin-top:0}
+          .retry-button{background:#4F46E5;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;margin-top:1rem;cursor:pointer}
+          .retry-button:hover{background:#4338ca}
        </style>
        <script>
          // Advanced progress tracking
@@ -1990,7 +2133,8 @@ async function handleShare(request) {
              'processing': 'AI is analyzing',
              'receiving-response': 'Receiving summary',
              'finalizing': 'Finalizing',
-             'complete': 'Completed'
+             'complete': 'Completed',
+             'error': 'Error occurred'
            };
            return phases[phase] || phase;
          }
@@ -2006,6 +2150,11 @@ async function handleShare(request) {
            if (progressBar && progress) {
              progressBar.style.width = \`\${progress.percent}%\`;
              progressPhase.textContent = formatPhase(progress.phase);
+             
+             if (progress.phase === 'error') {
+               progressPhase.style.color = '#dc2626';
+               document.getElementById('progressSection').style.opacity = '0.5';
+             }
              
              if (progress.estimatedTimeRemaining > 0) {
                progressTime.textContent = \`\${formatTimeRemaining(progress.estimatedTimeRemaining)}\`;
@@ -2029,10 +2178,63 @@ async function handleShare(request) {
              title.textContent = error.title || 'Error occurred';
              message.textContent = error.message || 'Something went wrong during summarization';
              
+             // Handle retry button setup
+             if (error.retryable) {
+               document.getElementById('retryButton').style.display = 'inline-block';
+             } else {
+               document.getElementById('retryButton').style.display = 'none';
+             }
+             
              errorContainer.style.display = 'block';
              
-             // Hide progress elements
-             document.getElementById('progressSection').style.display = 'none';
+             // Fade progress elements
+             document.getElementById('progressSection').style.opacity = '0.5';
+           }
+         }
+         
+         // Retry request
+         function retryRequest() {
+           if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+             // Update UI to show we're retrying
+             const retryButton = document.getElementById('retryButton');
+             retryButton.textContent = 'Retrying...';
+             retryButton.disabled = true;
+             
+             // Ask service worker to retry the summarization
+             navigator.serviceWorker.controller.postMessage({
+               action: 'retryFailedSummary',
+               url: '${sharedURL}'
+             });
+             
+             // Reset progress section
+             document.getElementById('progressSection').style.opacity = '1';
+             document.getElementById('progressBar').style.width = '5%';
+             document.getElementById('progressPhase').textContent = 'Initializing';
+             document.getElementById('progressPhase').style.color = '#6b7280';
+             
+             // Hide error container
+             document.getElementById('errorContainer').style.display = 'none';
+             
+             // Listen for retry outcome
+             navigator.serviceWorker.addEventListener('message', function retryHandler(event) {
+               if (event.data.action === 'retrySuccess') {
+                 // On success, reload the page to show the summary
+                 window.location.reload();
+               } else if (event.data.action === 'retryFailure') {
+                 // On failure, show error and reenable button
+                 showError({
+                   title: event.data.error.troubleshooting?.title || 'Retry Failed',
+                   message: event.data.error.message,
+                   retryable: event.data.error.severity === 'temporary'
+                 });
+                 
+                 retryButton.textContent = 'Retry';
+                 retryButton.disabled = false;
+                 
+                 // Remove this listener
+                 navigator.serviceWorker.removeEventListener('message', retryHandler);
+               }
+             });
            }
          }
          
@@ -2071,7 +2273,8 @@ async function handleShare(request) {
                if (errorData.error) {
                  showError({
                    title: errorData.troubleshooting?.title || 'Error',
-                   message: errorData.error
+                   message: errorData.error,
+                   retryable: errorData.severity === 'temporary'
                  });
                } else {
                  setTimeout(() => window.location.reload(), 3000);
@@ -2109,7 +2312,8 @@ async function handleShare(request) {
        <div id="errorContainer" class="error-container">
          <h3 class="error-title" id="errorTitle">Error</h3>
          <p id="errorMessage">An error occurred while generating the summary.</p>
-         <button onclick="window.location.reload()" style="background:#4F46E5;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;margin-top:1rem;cursor:pointer">Try Again</button>
+         <button id="retryButton" onclick="retryRequest()" class="retry-button">Retry</button>
+         <button onclick="window.location.reload()" style="background:#6b7280;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;margin-top:1rem;margin-left:0.5rem;cursor:pointer">Go Back</button>
        </div>
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
@@ -2143,6 +2347,9 @@ function createErrorResponse(error) {
   const steps = errorInfo.troubleshooting && errorInfo.troubleshooting.steps || [];
   const stepsList = steps.map(step => `<li>${step}</li>`).join('');
   
+  // Check if error is retryable
+  const isRetryable = errorInfo.severity === ErrorSeverity.TEMPORARY;
+  
   // Create simplified HTML response
   return new Response(`
     <!doctype html><html><head><meta charset="utf-8">
@@ -2158,8 +2365,52 @@ function createErrorResponse(error) {
       .help li{margin-bottom:0.5rem}
       .back{display:inline-block;margin-top:1rem;color:#4F46E5;text-decoration:none}
       .back:hover{text-decoration:underline}
-      .retry{background:#4F46E5;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;cursor:pointer;float:right}
+      .retry{background:#4F46E5;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;cursor:pointer;margin-right:0.5rem}
+      .retry:hover{background:#4338ca}
+      .back-button{background:#6b7280;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;cursor:pointer;margin-top:1rem}
+      .button-container{margin-top:1.5rem}
     </style>
+    <script>
+      function retryRequest() {
+        if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+          // Get the URL from the current page (it's in our query parameters)
+          const urlParams = new URLSearchParams(window.location.search);
+          const url = urlParams.get('url');
+          
+          if (!url) {
+            alert('Could not find URL to retry');
+            return;
+          }
+          
+          // Update button
+          const retryButton = document.getElementById('retryButton');
+          retryButton.textContent = 'Retrying...';
+          retryButton.disabled = true;
+          
+          // Send retry message to service worker
+          navigator.serviceWorker.controller.postMessage({
+            action: 'retryFailedSummary',
+            url: url
+          });
+          
+          // Listen for result
+          navigator.serviceWorker.addEventListener('message', function retryHandler(event) {
+            if (event.data.action === 'retrySuccess') {
+              // On success, show the summary
+              location.reload();
+            } else if (event.data.action === 'retryFailure') {
+              // On failure, show error and reenable button
+              alert('Retry failed: ' + event.data.error.message);
+              retryButton.textContent = 'Retry';
+              retryButton.disabled = false;
+              
+              // Remove this listener
+              navigator.serviceWorker.removeEventListener('message', retryHandler);
+            }
+          });
+        }
+      }
+    </script>
     </head>
     <body>
       <h2>❌ Error occurred</h2>
@@ -2171,8 +2422,10 @@ function createErrorResponse(error) {
         <h3>How to fix this:</h3>
         <ul>${stepsList}</ul>
       </div>
-      <a class="back" href="javascript:history.back()">← Back</a>
-      <button onclick="window.location.reload()" class="retry">Try Again</button>
+      <div class="button-container">
+        ${isRetryable ? '<button id="retryButton" onclick="retryRequest()" class="retry">Retry Now</button>' : ''}
+        <a href="javascript:history.back()" class="back-button">Go Back</a>
+      </div>
     </body>
     </html>`,
     { headers:{'Content-Type':'text/html'} }
