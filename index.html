@@ -1343,8 +1343,15 @@
         return;
       }
       
-      exportSummary(index, format);
-      closeExportModal();
+      // Add error handling for export process
+      try {
+        exportSummary(index, format);
+        closeExportModal();
+      } catch (error) {
+        console.error('Export failed:', error);
+        showStatus('Failed to export summary: ' + (error.message || 'Unknown error'), 'error');
+        closeExportModal();
+      }
     };
     
     /**
