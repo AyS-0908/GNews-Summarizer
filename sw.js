@@ -40,6 +40,10 @@ self.addEventListener('message', async event => {
   }
 });
 
+/**
+ * Fetches the AI provider configuration from the client
+ * @returns {Promise<Object|null>} Configuration object or null if not found/timeout
+ */
 async function getConfig() {
   const clients = await self.clients.matchAll();
   let config = null;
@@ -61,6 +65,10 @@ async function getConfig() {
   return config;
 }
 
+/**
+ * Checks if queue mode is enabled
+ * @returns {Promise<boolean>} True if queue mode is enabled
+ */
 async function getQueueMode() {
   const clients = await self.clients.matchAll();
   let queueMode = false;
@@ -82,6 +90,10 @@ async function getQueueMode() {
   return queueMode;
 }
 
+/**
+ * Adds a URL to the processing queue
+ * @param {string} url - The URL to add to the queue
+ */
 async function addToQueue(url) {
   const clients = await self.clients.matchAll();
   
@@ -96,77 +108,287 @@ async function addToQueue(url) {
   }
 }
 
-async function getSummary(url, config) {
-  let summaryText = '';
-  
-  if (config.provider === 'openai') {
-    const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          {
-            role: 'user',
-            content: `Please summarize this article: ${url}`
-          }
-        ],
-        max_tokens: 500
-      })
-    });
-    const data = await aiResponse.json();
-    summaryText = data.choices[0].message.content;
+/**
+ * Error types for better error classification
+ */
+const ErrorType = {
+  NETWORK: 'NETWORK',
+  API_KEY: 'API_KEY',
+  RATE_LIMIT: 'RATE_LIMIT',
+  INVALID_URL: 'INVALID_URL',
+  TIMEOUT: 'TIMEOUT',
+  SERVER: 'SERVER',
+  UNKNOWN: 'UNKNOWN'
+};
+
+/**
+ * Custom error class with error type classification
+ */
+class SummarizerError extends Error {
+  constructor(message, type = ErrorType.UNKNOWN, originalError = null) {
+    super(message);
+    this.name = 'SummarizerError';
+    this.type = type;
+    this.originalError = originalError;
   }
-  else if (config.provider === 'anthropic') {
-    const aiResponse = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': config.apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: config.model,
-        max_tokens: 500,
-        messages: [
-          {
-            role: 'user',
-            content: `Please summarize this article: ${url}`
-          }
-        ]
-      })
-    });
-    const data = await aiResponse.json();
-    summaryText = data.content[0].text;
-  }
-  else if (config.provider === 'deepseek') {
-    const aiResponse = await fetch('https://api.deepseek.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'deepseek-chat',
-        messages: [
-          {
-            role: 'user',
-            content: `Please summarize this article: ${url}`
-          }
-        ],
-        max_tokens: 500
-      })
-    });
-    const data = await aiResponse.json();
-    summaryText = data.choices[0].message.content;
-  }
-  
-  return summaryText;
 }
 
+/**
+ * Gets a user-friendly error message based on error type
+ * @param {SummarizerError} error - The error object
+ * @returns {string} User-friendly error message
+ */
+function getUserFriendlyErrorMessage(error) {
+  switch (error.type) {
+    case ErrorType.NETWORK:
+      return 'Network connection error. Please check your internet connection and try again.';
+    case ErrorType.API_KEY:
+      return 'Invalid API key. Please update your API key in the configuration.';
+    case ErrorType.RATE_LIMIT:
+      return 'API rate limit exceeded. Please try again later.';
+    case ErrorType.INVALID_URL:
+      return 'Invalid article URL. Please make sure you\'re sharing a valid news article.';
+    case ErrorType.TIMEOUT:
+      return 'Request timed out. The AI service might be experiencing high load. Please try again later.';
+    case ErrorType.SERVER:
+      return 'The AI service is experiencing issues. Please try again later.';
+    default:
+      return `Unexpected error: ${error.message}`;
+  }
+}
+
+/**
+ * Classifies error based on response and error details
+ * @param {Error} error - Original error
+ * @param {Response|null} response - Fetch response if available
+ * @returns {SummarizerError} Classified error
+ */
+function classifyError(error, response = null) {
+  // Network errors (no response)
+  if (!response) {
+    if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+      return new SummarizerError('Network connection error', ErrorType.NETWORK, error);
+    }
+    if (error.message.includes('timeout') || error.message.includes('Timed out')) {
+      return new SummarizerError('Request timed out', ErrorType.TIMEOUT, error);
+    }
+    return new SummarizerError(error.message, ErrorType.UNKNOWN, error);
+  }
+  
+  // HTTP status based errors
+  switch (response.status) {
+    case 401:
+    case 403:
+      return new SummarizerError('Invalid API key', ErrorType.API_KEY, error);
+    case 429:
+      return new SummarizerError('Rate limit exceeded', ErrorType.RATE_LIMIT, error);
+    case 400:
+      return new SummarizerError('Invalid request format', ErrorType.INVALID_URL, error);
+    case 500:
+    case 502:
+    case 503:
+    case 504:
+      return new SummarizerError('Server error', ErrorType.SERVER, error);
+    default:
+      return new SummarizerError(`Error (${response.status})`, ErrorType.UNKNOWN, error);
+  }
+}
+
+/**
+ * Fetches with retry logic for transient errors
+ * @param {string} url - URL to fetch
+ * @param {Object} options - Fetch options
+ * @param {number} retries - Number of retries (default: 2)
+ * @param {number} retryDelay - Delay between retries in ms (default: 1000)
+ * @returns {Promise<Response>} Fetch response
+ */
+async function fetchWithRetry(url, options, retries = 2, retryDelay = 1000) {
+  try {
+    const response = await fetch(url, options);
+    
+    // Success, or non-retriable error
+    if (response.ok || ![429, 500, 502, 503, 504].includes(response.status) || retries === 0) {
+      return response;
+    }
+    
+    // Prepare for retry with exponential backoff
+    const delay = retryDelay * (1 + Math.random());
+    await new Promise(resolve => setTimeout(resolve, delay));
+    
+    // Retry
+    return fetchWithRetry(url, options, retries - 1, retryDelay * 2);
+  } catch (error) {
+    // Don't retry network errors on last attempt
+    if (retries === 0) {
+      throw error;
+    }
+    
+    // Retry network errors
+    const delay = retryDelay * (1 + Math.random());
+    await new Promise(resolve => setTimeout(resolve, delay));
+    return fetchWithRetry(url, options, retries - 1, retryDelay * 2);
+  }
+}
+
+/**
+ * Validates a URL
+ * @param {string} url - URL to validate
+ * @returns {boolean} True if URL is valid
+ */
+function isValidUrl(url) {
+  try {
+    new URL(url);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Gets an article summary from the configured AI provider
+ * @param {string} url - Article URL to summarize
+ * @param {Object} config - AI provider configuration
+ * @returns {Promise<string>} Summary text
+ * @throws {SummarizerError} If summarization fails
+ */
+async function getSummary(url, config) {
+  // URL validation
+  if (!url || !isValidUrl(url)) {
+    throw new SummarizerError('Invalid article URL', ErrorType.INVALID_URL);
+  }
+  
+  let summaryText = '';
+  let aiResponse = null;
+  
+  try {
+    // Format the AI prompt based on article URL
+    const promptText = `Please provide a concise summary of this news article: ${url}. Focus on the key facts, main points, and important context.`;
+    
+    // Call the appropriate AI provider
+    if (config.provider === 'openai') {
+      aiResponse = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            {
+              role: 'user',
+              content: promptText
+            }
+          ],
+          max_tokens: 500
+        })
+      });
+      
+      // Handle HTTP errors
+      if (!aiResponse.ok) {
+        const errorText = await aiResponse.text().catch(() => 'Unknown error');
+        throw new Error(errorText);
+      }
+      
+      const data = await aiResponse.json();
+      
+      // Validate response structure
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error('Invalid API response format');
+      }
+      
+      summaryText = data.choices[0].message.content;
+    }
+    else if (config.provider === 'anthropic') {
+      aiResponse = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': config.apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: config.model,
+          max_tokens: 500,
+          messages: [
+            {
+              role: 'user',
+              content: promptText
+            }
+          ]
+        })
+      });
+      
+      // Handle HTTP errors
+      if (!aiResponse.ok) {
+        const errorText = await aiResponse.text().catch(() => 'Unknown error');
+        throw new Error(errorText);
+      }
+      
+      const data = await aiResponse.json();
+      
+      // Validate response structure
+      if (!data.content || !data.content[0] || !data.content[0].text) {
+        throw new Error('Invalid API response format');
+      }
+      
+      summaryText = data.content[0].text;
+    }
+    else if (config.provider === 'deepseek') {
+      aiResponse = await fetchWithRetry('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          messages: [
+            {
+              role: 'user',
+              content: promptText
+            }
+          ],
+          max_tokens: 500
+        })
+      });
+      
+      // Handle HTTP errors
+      if (!aiResponse.ok) {
+        const errorText = await aiResponse.text().catch(() => 'Unknown error');
+        throw new Error(errorText);
+      }
+      
+      const data = await aiResponse.json();
+      
+      // Validate response structure
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error('Invalid API response format');
+      }
+      
+      summaryText = data.choices[0].message.content;
+    }
+    else {
+      throw new SummarizerError(`Unsupported AI provider: ${config.provider}`, ErrorType.UNKNOWN);
+    }
+    
+    // Validate summary
+    if (!summaryText || summaryText.trim() === '') {
+      throw new SummarizerError('Empty summary returned', ErrorType.UNKNOWN);
+    }
+    
+    return summaryText;
+  } catch (error) {
+    // Classify and rethrow the error
+    throw classifyError(error, aiResponse);
+  }
+}
+
+/**
+ * Process a batch of articles
+ * @param {Array} articles - Array of article objects
+ * @returns {Promise<Array>} Results array
+ */
 async function processBatchArticles(articles) {
   const config = await getConfig();
   if (!config) return [];
@@ -195,10 +417,16 @@ async function processBatchArticles(articles) {
         success: true
       });
     } catch (error) {
+      // Use friendly error messages
+      const errorMessage = error instanceof SummarizerError 
+        ? getUserFriendlyErrorMessage(error)
+        : `Error: ${error.message}`;
+        
       results.push({
         url: article.url,
-        summary: `Error: ${error.message}`,
-        success: false
+        summary: errorMessage,
+        success: false,
+        errorType: error instanceof SummarizerError ? error.type : ErrorType.UNKNOWN
       });
     }
   }
@@ -206,10 +434,35 @@ async function processBatchArticles(articles) {
   return results;
 }
 
+/**
+ * Handle article share request
+ * @param {Request} request - The share request
+ * @returns {Promise<Response>} HTML response
+ */
 async function handleShare(request) {
   // Extract the URL provided by Android
-  const formData = await request.formData();
-  const sharedURL = formData.get('url');
+  let sharedURL = '';
+  
+  try {
+    const formData = await request.formData();
+    sharedURL = formData.get('url');
+    
+    // Validate URL format
+    if (!sharedURL || !isValidUrl(sharedURL)) {
+      throw new SummarizerError(
+        'Invalid article URL. Please make sure you\'re sharing a valid web article.',
+        ErrorType.INVALID_URL
+      );
+    }
+  } catch (error) {
+    if (error instanceof SummarizerError) {
+      return createErrorResponse(error);
+    }
+    
+    return createErrorResponse(
+      new SummarizerError('Could not process the shared content.', ErrorType.UNKNOWN, error)
+    );
+  }
 
   // Get configuration and queue mode
   const config = await getConfig();
@@ -309,17 +562,53 @@ async function handleShare(request) {
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
   } catch (error) {
-    return new Response(`
-       <!doctype html><html><head><meta charset="utf-8">
-       <title>Error</title><style>
-          body{font-family:sans-serif;padding:2rem;line-height:1.4}
-          pre{white-space:pre-wrap;background:#f1f1f1;padding:1rem}
-       </style></head><body>
-       <h2>❌ Error</h2>
-       <p>Failed to generate summary. Error details:</p>
-       <pre>${error.message}</pre>
-       <a href="javascript:history.back()">← Back</a>
-       </body></html>`,
-       { headers:{'Content-Type':'text/html'} });
+    return createErrorResponse(error);
   }
+}
+
+/**
+ * Creates an error response
+ * @param {Error} error - Error object
+ * @returns {Response} HTML error response
+ */
+function createErrorResponse(error) {
+  // Get user-friendly error message
+  const errorMessage = error instanceof SummarizerError 
+    ? getUserFriendlyErrorMessage(error)
+    : `Error: ${error.message}`;
+  
+  // Create helpful error page
+  return new Response(`
+    <!doctype html><html><head><meta charset="utf-8">
+    <title>Error</title><style>
+       body{font-family:sans-serif;padding:2rem;line-height:1.4}
+       .error-container{background:#fef2f2;border-left:4px solid #ef4444;padding:1rem;border-radius:4px}
+       .error-title{color:#991b1b;margin-top:0}
+       .error-message{color:#1f2937}
+       .error-help{margin-top:1.5rem;color:#4b5563}
+       .error-help ul{padding-left:1.5rem}
+       .error-help li{margin-bottom:0.5rem}
+       .back-link{display:inline-block;margin-top:1.5rem;color:#4F46E5;text-decoration:none}
+       .back-link:hover{text-decoration:underline}
+    </style></head><body>
+    <h2>❌ Error occurred</h2>
+    
+    <div class="error-container">
+      <h3 class="error-title">Failed to generate summary</h3>
+      <p class="error-message">${errorMessage}</p>
+    </div>
+    
+    <div class="error-help">
+      <h3>Troubleshooting tips:</h3>
+      <ul>
+        <li>Make sure your internet connection is working</li>
+        <li>Verify that your API key is valid and correctly configured</li>
+        <li>Check that the shared URL is from a valid news article</li>
+        <li>Try again later if the AI service might be experiencing high load</li>
+      </ul>
+    </div>
+    
+    <a class="back-link" href="javascript:history.back()">← Back</a>
+    </body></html>`,
+    { headers:{'Content-Type':'text/html'} });
 }
