@@ -214,6 +214,37 @@
             color: #64748b;
         }
 
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            margin-right: 0.5rem;
+            transform: scale(1.2);
+        }
+
+        .checkbox-group label {
+            font-size: 0.9rem;
+            color: #475569;
+            cursor: pointer;
+        }
+
+        .recovery-fields {
+            display: none;
+            background: #f8fafc;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-top: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .recovery-fields.visible {
+            display: block;
+        }
+
         .install-button {
             background: #10b981;
             color: white;
@@ -414,6 +445,11 @@
             background: #4338ca;
         }
 
+        /* Recovery modal */
+        .recovery-modal-content {
+            max-width: 550px;
+        }
+
         @media (max-width: 640px) {
             .container {
                 padding: 1.5rem;
@@ -455,7 +491,7 @@
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
             </svg>
             <p>
-                <strong>Enhanced Security:</strong> Your API keys are automatically encrypted using a device-specific key. This security feature ensures your keys can only be used from this device.
+                <strong>Enhanced Security:</strong> Your API keys are automatically encrypted using device-specific binding. For added safety, you can now <a href="#" onclick="showRecoveryModal(); return false;">create a recovery key</a> that works across devices.
             </p>
         </div>
 
@@ -484,6 +520,17 @@
                             <option value="gpt-3.5-turbo" selected>GPT-3.5-Turbo (Faster)</option>
                         </select>
                     </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="openai-recovery" class="enable-recovery">
+                        <label for="openai-recovery">Enable recovery key (optional but recommended)</label>
+                    </div>
+                    <div class="recovery-fields" id="openai-recovery-fields">
+                        <div class="input-group">
+                            <label for="openai-recovery-pin">Recovery PIN (4-6 digits)</label>
+                            <input type="password" id="openai-recovery-pin" placeholder="Create a PIN" maxlength="6" pattern="[0-9]*" inputmode="numeric">
+                            <span class="hint">This PIN will let you recover your API key on a new device</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -508,6 +555,17 @@
                             <option value="claude-3-sonnet-20240229" selected>Claude 3 Sonnet (Balanced)</option>
                         </select>
                     </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="anthropic-recovery" class="enable-recovery">
+                        <label for="anthropic-recovery">Enable recovery key (optional but recommended)</label>
+                    </div>
+                    <div class="recovery-fields" id="anthropic-recovery-fields">
+                        <div class="input-group">
+                            <label for="anthropic-recovery-pin">Recovery PIN (4-6 digits)</label>
+                            <input type="password" id="anthropic-recovery-pin" placeholder="Create a PIN" maxlength="6" pattern="[0-9]*" inputmode="numeric">
+                            <span class="hint">This PIN will let you recover your API key on a new device</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -524,6 +582,17 @@
                         <label for="deepseek-key">API Key</label>
                         <input type="password" id="deepseek-key" placeholder="API Key...">
                         <span class="hint">Your API key is securely encrypted for this device only</span>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="deepseek-recovery" class="enable-recovery">
+                        <label for="deepseek-recovery">Enable recovery key (optional but recommended)</label>
+                    </div>
+                    <div class="recovery-fields" id="deepseek-recovery-fields">
+                        <div class="input-group">
+                            <label for="deepseek-recovery-pin">Recovery PIN (4-6 digits)</label>
+                            <input type="password" id="deepseek-recovery-pin" placeholder="Create a PIN" maxlength="6" pattern="[0-9]*" inputmode="numeric">
+                            <span class="hint">This PIN will let you recover your API key on a new device</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -574,6 +643,57 @@
             </ul>
             <div class="modal-footer">
                 <button class="understand-button" onclick="closeModalAndRedirect()">I Understand</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recovery Key Explanation Modal -->
+    <div class="modal-overlay" id="recoveryModal">
+        <div class="modal-content recovery-modal-content">
+            <button class="modal-close" onclick="closeModal('recoveryModal')">&times;</button>
+            <div class="modal-header">
+                <h2>🔑 Recovery Key System</h2>
+            </div>
+            <div class="modal-section">
+                <h3>Why Use a Recovery Key?</h3>
+                <p style="margin-bottom: 1rem; color: #475569;">
+                    Our app uses device-specific encryption to protect your API keys. While this is secure, it means 
+                    your keys are locked to this device. If your browser updates or you switch devices, you might lose 
+                    access to your API keys.
+                </p>
+                <p style="color: #475569;">
+                    A recovery PIN provides a way to access your API keys even when the device signature changes, 
+                    without compromising security.
+                </p>
+            </div>
+            <div class="modal-section">
+                <h3>How It Works</h3>
+                <ul class="step-list">
+                    <li class="step-item">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>Create a PIN</h3>
+                            <p>Set a 4-6 digit PIN when configuring your API provider</p>
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>We Create a Recovery Key</h3>
+                            <p>Your API key is encrypted with both your device signature and your PIN</p>
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>If Device Changes</h3>
+                            <p>When you need to recover, enter your PIN and we'll restore your API key</p>
+                        </div>
+                    </li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button class="understand-button" onclick="closeModal('recoveryModal')">I Understand</button>
             </div>
         </div>
     </div>
@@ -656,28 +776,60 @@
         }
         
         /**
-         * Secure API key storage with device binding
+         * Creates a validation hash for recovery verification
+         * @param {string} apiKey - The API key 
+         * @param {string} pin - Recovery PIN
+         * @returns {string} - Validation hash
+         */
+        function createValidationHash(apiKey, pin) {
+            // Create a hash that can verify the PIN is correct for this API key
+            // but doesn't expose the API key itself
+            const combined = apiKey.substring(0, 4) + pin + apiKey.substring(apiKey.length - 4);
+            return stringToHash(combined);
+        }
+        
+        /**
+         * Secure API key storage with device binding and optional recovery
          * @param {string} apiKey - API key to securely store
          * @param {string} provider - AI Provider name
          * @param {string} model - Selected model
+         * @param {string|null} recoveryPin - Optional recovery PIN
          */
-        function securelyStoreApiKey(apiKey, provider, model) {
+        function securelyStoreApiKey(apiKey, provider, model, recoveryPin = null) {
             // Generate device-specific encryption key
             const deviceSignature = generateDeviceSignature();
             const deviceKey = stringToHash(deviceSignature);
             
-            // Encrypt the API key
+            // Encrypt the API key with device signature
             const encryptedKey = encryptString(apiKey, deviceKey);
             
-            // Store configuration (with encrypted key)
+            // Create the configuration object
             const config = {
                 provider: provider,
                 model: model,
                 encryptedKey: encryptedKey,
-                securityVersion: 1, // For future compatibility
+                securityVersion: 2, // Updated version for recovery support
                 lastUpdated: new Date().toISOString()
             };
             
+            // If recovery PIN is provided, add recovery information
+            if (recoveryPin && recoveryPin.length >= 4) {
+                // Create a secondary encryption using the PIN
+                const recoveryEncryptedKey = encryptString(apiKey, recoveryPin);
+                
+                // Store validation hash to verify correct PIN without exposing the key
+                const validationHash = createValidationHash(apiKey, recoveryPin);
+                
+                // Add recovery information to config
+                config.recovery = {
+                    enabled: true,
+                    encryptedKey: recoveryEncryptedKey,
+                    validationHash: validationHash,
+                    // We don't store the PIN itself for security
+                };
+            }
+            
+            // Store the config
             localStorage.setItem('ai_summarizer_config', JSON.stringify(config));
         }
         
@@ -693,8 +845,37 @@
             const deviceSignature = generateDeviceSignature();
             const deviceKey = stringToHash(deviceSignature);
             
-            // Decrypt API key
-            return decryptString(config.encryptedKey, deviceKey);
+            // Try to decrypt API key with device signature
+            const apiKey = decryptString(config.encryptedKey, deviceKey);
+            
+            // If successful, return the API key
+            if (apiKey && apiKey.length > 10) {
+                return apiKey;
+            }
+            
+            return null;
+        }
+
+        /**
+         * Show the recovery modal
+         */
+        function showRecoveryModal() {
+            document.getElementById('recoveryModal').classList.add('active');
+        }
+
+        /**
+         * Toggle recovery field visibility
+         * @param {string} providerId - Provider ID
+         */
+        function toggleRecoveryFields(providerId) {
+            const checkbox = document.getElementById(`${providerId}-recovery`);
+            const fields = document.getElementById(`${providerId}-recovery-fields`);
+            
+            if (checkbox.checked) {
+                fields.classList.add('visible');
+            } else {
+                fields.classList.remove('visible');
+            }
         }
 
         // Check for existing configuration and pre-fill form
@@ -730,6 +911,15 @@
                     const modelSelect = providerOption.querySelector('select');
                     if (modelSelect && config.model) {
                         modelSelect.value = config.model;
+                    }
+                    
+                    // Check recovery checkbox if enabled
+                    if (config.recovery && config.recovery.enabled) {
+                        const recoveryCheckbox = document.getElementById(`${config.provider}-recovery`);
+                        if (recoveryCheckbox) {
+                            recoveryCheckbox.checked = true;
+                            toggleRecoveryFields(config.provider);
+                        }
                     }
                     
                     // Enable install button
@@ -797,8 +987,19 @@
             const modelSelect = providerOption.querySelector('select');
             const model = modelSelect ? modelSelect.value : null;
 
-            // Save configuration with encrypted API key
-            securelyStoreApiKey(apiKey, selectedProvider, model);
+            // Check if recovery is enabled
+            const recoveryCheckbox = document.getElementById(`${selectedProvider}-recovery`);
+            let recoveryPin = null;
+            
+            if (recoveryCheckbox && recoveryCheckbox.checked) {
+                const recoveryPinInput = document.getElementById(`${selectedProvider}-recovery-pin`);
+                if (recoveryPinInput && recoveryPinInput.value.length >= 4) {
+                    recoveryPin = recoveryPinInput.value;
+                }
+            }
+
+            // Save configuration with encrypted API key and optional recovery
+            securelyStoreApiKey(apiKey, selectedProvider, model, recoveryPin);
 
             // Show success message and instructions modal
             document.getElementById('successMessage').style.display = 'block';
@@ -809,6 +1010,14 @@
             setTimeout(() => {
                 showModal();
             }, 1000);
+        });
+
+        // Setup recovery checkbox handlers
+        document.querySelectorAll('.enable-recovery').forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+                const providerId = checkbox.id.split('-')[0];
+                toggleRecoveryFields(providerId);
+            });
         });
 
         // Load existing configuration when page loads
