@@ -8,6 +8,32 @@ const STATIC_CACHE = `static-cache-${CACHE_VERSION}`;
 // Default cache expiration time (24 hours)
 const CACHE_EXPIRATION = 24 * 60 * 60 * 1000;
 
+/* Rate limiting configuration */
+const RATE_LIMITS = {
+  // Maximum number of API calls per provider in the time window
+  openai: {
+    maxRequests: 10,       // 10 requests per window
+    windowMs: 60 * 1000,   // 1 minute window
+  },
+  anthropic: {
+    maxRequests: 15,       // 15 requests per window
+    windowMs: 60 * 1000,   // 1 minute window
+  },
+  deepseek: {
+    maxRequests: 20,       // 20 requests per window
+    windowMs: 60 * 1000,   // 1 minute window
+  },
+  // Default limit for any provider not explicitly listed
+  default: {
+    maxRequests: 10,
+    windowMs: 60 * 1000,
+  }
+};
+
+// Storage for rate limiting
+let apiCallHistory = {};
+let lastCleanup = Date.now();
+
 /* 1) Standard install / activate with cache management */
 self.addEventListener('install', evt => {
   evt.waitUntil(
@@ -102,7 +128,9 @@ self.addEventListener('fetch', event => {
 
 /* 3) Handle messages from the main app */
 self.addEventListener('message', async event => {
-  if (event.data.action === 'summarizeQueue') {
+  const messageAction = event.data.action;
+  
+  if (messageAction === 'summarizeQueue') {
     // Handle batch summarization request
     const articles = event.data.articles;
     
@@ -123,7 +151,7 @@ self.addEventListener('message', async event => {
         results: results
       });
     }
-  } else if (event.data.action === 'clearCache') {
+  } else if (messageAction === 'clearCache') {
     // Clear summary cache when requested
     clearSummaryCache().then(result => {
       if (event.source) {
@@ -133,6 +161,23 @@ self.addEventListener('message', async event => {
         });
       }
     });
+  } else if (messageAction === 'getRateLimitStatus') {
+    // Return current rate limit status for each provider
+    const status = getRateLimitStatus();
+    if (event.source) {
+      event.source.postMessage({
+        action: 'rateLimitStatus',
+        status: status
+      });
+    }
+  } else if (messageAction === 'ping') {
+    // Respond to ping check from main app
+    if (event.source && event.ports && event.ports[0]) {
+      event.ports[0].postMessage({
+        action: 'pong',
+        timestamp: Date.now()
+      });
+    }
   }
 });
 
@@ -271,6 +316,22 @@ async function handleApiSummarize(url) {
       });
     }
     
+    // Check rate limits before making API call
+    const rateLimitCheck = checkRateLimit(config.provider);
+    if (!rateLimitCheck.allowed) {
+      return new Response(JSON.stringify({ 
+        error: `Rate limit exceeded. Please try again after ${rateLimitCheck.retryAfterSeconds} seconds.`,
+        errorType: ErrorType.RATE_LIMIT,
+        retryAfter: rateLimitCheck.retryAfterSeconds
+      }), {
+        status: 429,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Retry-After': String(rateLimitCheck.retryAfterSeconds)
+        }
+      });
+    }
+    
     const summary = await getSummary(url, config);
     
     // Cache the result
@@ -311,6 +372,119 @@ async function clearSummaryCache() {
     console.error('Failed to clear cache:', error);
     return false;
   }
+}
+
+/**
+ * Rate limiting functions
+ */
+
+/**
+ * Record an API call for rate limiting
+ * @param {string} provider - AI provider name
+ */
+function recordApiCall(provider) {
+  const now = Date.now();
+  
+  // Create provider entry if it doesn't exist
+  if (!apiCallHistory[provider]) {
+    apiCallHistory[provider] = [];
+  }
+  
+  // Add this call to history
+  apiCallHistory[provider].push(now);
+  
+  // Clean up old entries periodically (every minute)
+  if (now - lastCleanup > 60000) {
+    cleanupApiCallHistory();
+    lastCleanup = now;
+  }
+}
+
+/**
+ * Clean up expired API call history entries
+ */
+function cleanupApiCallHistory() {
+  const now = Date.now();
+  
+  Object.keys(apiCallHistory).forEach(provider => {
+    const limit = RATE_LIMITS[provider] || RATE_LIMITS.default;
+    // Keep only calls within the current window
+    apiCallHistory[provider] = apiCallHistory[provider].filter(
+      timestamp => now - timestamp < limit.windowMs
+    );
+    
+    // If array is empty, delete the provider entry
+    if (apiCallHistory[provider].length === 0) {
+      delete apiCallHistory[provider];
+    }
+  });
+}
+
+/**
+ * Check if an API call is allowed under rate limits
+ * @param {string} provider - AI provider name
+ * @returns {Object} Result with allowed status and retry info
+ */
+function checkRateLimit(provider) {
+  const now = Date.now();
+  const limit = RATE_LIMITS[provider] || RATE_LIMITS.default;
+  
+  // Clean up expired calls
+  if (!apiCallHistory[provider]) {
+    apiCallHistory[provider] = [];
+  } else {
+    apiCallHistory[provider] = apiCallHistory[provider].filter(
+      timestamp => now - timestamp < limit.windowMs
+    );
+  }
+  
+  // Check if we're over the limit
+  if (apiCallHistory[provider].length >= limit.maxRequests) {
+    // Calculate time until oldest call expires
+    const oldestCall = Math.min(...apiCallHistory[provider]);
+    const resetTime = oldestCall + limit.windowMs;
+    const waitMs = resetTime - now;
+    
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.ceil(waitMs / 1000) || 1
+    };
+  }
+  
+  // If we get here, the call is allowed
+  return { allowed: true };
+}
+
+/**
+ * Get the current rate limit status for all providers
+ * @returns {Object} Status object with usage info for each provider
+ */
+function getRateLimitStatus() {
+  const now = Date.now();
+  const status = {};
+  
+  // Ensure we have clean data
+  cleanupApiCallHistory();
+  
+  // Generate status for each provider
+  Object.keys(RATE_LIMITS).forEach(provider => {
+    if (provider === 'default') return;
+    
+    const limit = RATE_LIMITS[provider];
+    const calls = apiCallHistory[provider] || [];
+    
+    status[provider] = {
+      used: calls.length,
+      limit: limit.maxRequests,
+      remaining: limit.maxRequests - calls.length,
+      resetInSeconds: calls.length > 0 
+        ? Math.ceil((Math.min(...calls) + limit.windowMs - now) / 1000)
+        : 0,
+      windowSeconds: limit.windowMs / 1000
+    };
+  });
+  
+  return status;
 }
 
 /**
@@ -369,21 +543,72 @@ function decryptString(encryptedText, key) {
 }
 
 /**
+ * Try to decrypt an API key using recovery PIN if device decryption fails
+ * @param {Object} config - Configuration with recovery info
+ * @param {string} pin - Recovery PIN to try
+ * @returns {string|null} - Decrypted API key or null if recovery fails
+ */
+function tryRecoveryDecryption(config, pin) {
+  if (!config || !config.recovery || !config.recovery.enabled || !pin) {
+    return null;
+  }
+  
+  try {
+    // Decrypt API key using recovery PIN
+    const decryptedKey = decryptString(config.recovery.encryptedKey, pin);
+    
+    // Verify the PIN is correct by checking the validation hash
+    // This helps prevent brute force attempts and validates the PIN worked correctly
+    if (decryptedKey) {
+      const validationHash = createValidationHash(decryptedKey, pin);
+      if (validationHash === config.recovery.validationHash) {
+        return decryptedKey;
+      }
+    }
+  } catch (error) {
+    console.error('Recovery decryption failed:', error);
+  }
+  
+  return null;
+}
+
+/**
+ * Creates a validation hash for recovery verification
+ * Same implementation as in landing.html
+ * @param {string} apiKey - The API key 
+ * @param {string} pin - Recovery PIN
+ * @returns {string} - Validation hash
+ */
+function createValidationHash(apiKey, pin) {
+  // Create a hash that can verify the PIN is correct for this API key
+  // but doesn't expose the API key itself
+  const combined = apiKey.substring(0, 4) + pin + apiKey.substring(apiKey.length - 4);
+  return stringToHash(combined);
+}
+
+/**
  * Decrypts an API key from an encrypted configuration
  * @param {Object} config - Configuration object with encryptedKey
+ * @param {string|null} recoveryPin - Optional recovery PIN if device decryption fails
  * @returns {Object} - Configuration with decrypted API key
  */
-function decryptApiKey(config) {
+function decryptApiKey(config, recoveryPin = null) {
   // If config already has a plaintext API key, return as is (legacy support)
   if (config.apiKey && !config.encryptedKey) {
     return config;
   }
   
-  // If encrypted key is present, decrypt it
+  // If encrypted key is present, decrypt it with device signature
   if (config.encryptedKey) {
     const deviceSignature = generateDeviceSignature();
     const deviceKey = stringToHash(deviceSignature);
-    const decryptedKey = decryptString(config.encryptedKey, deviceKey);
+    let decryptedKey = decryptString(config.encryptedKey, deviceKey);
+    
+    // If device decryption failed and recovery PIN is provided, try recovery
+    if ((!decryptedKey || decryptedKey.length < 10) && recoveryPin && 
+        config.recovery && config.recovery.enabled) {
+      decryptedKey = tryRecoveryDecryption(config, recoveryPin);
+    }
     
     // Create a new config object with the decrypted key
     return {
@@ -407,14 +632,26 @@ async function getConfig() {
   if (clients.length > 0) {
     await clients[0].postMessage({ action: 'getConfig' });
     config = await new Promise(resolve => {
-      self.addEventListener('message', function handler(event) {
-        if (event.data.action === 'config') {
+      let handled = false;
+      
+      function handler(event) {
+        if (event.data.action === 'config' && !handled) {
+          handled = true;
           self.removeEventListener('message', handler);
           resolve(event.data.config);
         }
-      });
+      }
+      
+      self.addEventListener('message', handler);
+      
       // Timeout after 2 seconds
-      setTimeout(() => resolve(null), 2000);
+      setTimeout(() => {
+        if (!handled) {
+          handled = true;
+          self.removeEventListener('message', handler);
+          resolve(null);
+        }
+      }, 2000);
     });
     
     // Decrypt API key if configuration was received
@@ -437,14 +674,26 @@ async function getQueueMode() {
   if (clients.length > 0) {
     await clients[0].postMessage({ action: 'getQueueMode' });
     queueMode = await new Promise(resolve => {
-      self.addEventListener('message', function handler(event) {
-        if (event.data.action === 'queueMode') {
+      let handled = false;
+      
+      function handler(event) {
+        if (event.data.action === 'queueMode' && !handled) {
+          handled = true;
           self.removeEventListener('message', handler);
           resolve(event.data.queueMode);
         }
-      });
+      }
+      
+      self.addEventListener('message', handler);
+      
       // Timeout after 2 seconds and default to false
-      setTimeout(() => resolve(false), 2000);
+      setTimeout(() => {
+        if (!handled) {
+          handled = true;
+          self.removeEventListener('message', handler);
+          resolve(false);
+        }
+      }, 2000);
     });
   }
   
@@ -506,7 +755,7 @@ function getUserFriendlyErrorMessage(error) {
     case ErrorType.API_KEY:
       return 'Invalid API key. Please update your API key in the configuration.';
     case ErrorType.RATE_LIMIT:
-      return 'API rate limit exceeded. Please try again later.';
+      return 'API rate limit exceeded. Please try again later or switch to a different AI provider.';
     case ErrorType.INVALID_URL:
       return 'Invalid article URL. Please make sure you\'re sharing a valid news article.';
     case ErrorType.TIMEOUT:
@@ -572,6 +821,21 @@ async function fetchWithRetry(url, options, retries = 2, retryDelay = 1000) {
       return response;
     }
     
+    // Special handling for rate limit (429) responses
+    if (response.status === 429) {
+      // Get retry-after header if available
+      let retryAfter = response.headers.get('Retry-After');
+      if (retryAfter) {
+        // Convert to milliseconds (it's in seconds)
+        retryAfter = parseInt(retryAfter, 10) * 1000;
+        if (!isNaN(retryAfter) && retryAfter > 0) {
+          // Use the server's retry suggestion
+          await new Promise(resolve => setTimeout(resolve, retryAfter));
+          return fetchWithRetry(url, options, retries - 1, retryDelay);
+        }
+      }
+    }
+    
     // Prepare for retry with exponential backoff
     const delay = retryDelay * (1 + Math.random());
     await new Promise(resolve => setTimeout(resolve, delay));
@@ -629,6 +893,15 @@ async function getSummary(url, config) {
     throw new SummarizerError('API key is missing or invalid', ErrorType.API_KEY);
   }
   
+  // Check rate limit before making the API call
+  const rateLimit = checkRateLimit(config.provider);
+  if (!rateLimit.allowed) {
+    throw new SummarizerError(
+      `API rate limit exceeded. Please try again after ${rateLimit.retryAfterSeconds} seconds.`, 
+      ErrorType.RATE_LIMIT
+    );
+  }
+  
   let summaryText = '';
   let aiResponse = null;
   
@@ -655,6 +928,9 @@ async function getSummary(url, config) {
           max_tokens: 500
         })
       });
+      
+      // Record the API call for rate limiting
+      recordApiCall('openai');
       
       // Handle HTTP errors
       if (!aiResponse.ok) {
@@ -691,6 +967,9 @@ async function getSummary(url, config) {
         })
       });
       
+      // Record the API call for rate limiting
+      recordApiCall('anthropic');
+      
       // Handle HTTP errors
       if (!aiResponse.ok) {
         const errorText = await aiResponse.text().catch(() => 'Unknown error');
@@ -724,6 +1003,9 @@ async function getSummary(url, config) {
           max_tokens: 500
         })
       });
+      
+      // Record the API call for rate limiting
+      recordApiCall('deepseek');
       
       // Handle HTTP errors
       if (!aiResponse.ok) {
@@ -790,7 +1072,21 @@ async function processBatchArticles(articles) {
       let fromCache = !!summary;
       
       if (!summary) {
+        // Check if we're hitting rate limits before making API call
+        const rateLimit = checkRateLimit(config.provider);
+        if (!rateLimit.allowed) {
+          throw new SummarizerError(
+            `API rate limit exceeded. Please try again after ${rateLimit.retryAfterSeconds} seconds.`,
+            ErrorType.RATE_LIMIT
+          );
+        }
+        
         summary = await getSummary(article.url, config);
+        
+        // Add a small delay between API calls to avoid overwhelming the provider
+        if (currentArticle < articles.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
       }
       
       results.push({
@@ -811,6 +1107,19 @@ async function processBatchArticles(articles) {
         success: false,
         errorType: error instanceof SummarizerError ? error.type : ErrorType.UNKNOWN
       });
+      
+      // If rate limited, stop processing and return what we have so far
+      if (error instanceof SummarizerError && error.type === ErrorType.RATE_LIMIT) {
+        // Tell the client about the remaining articles that weren't processed
+        const remainingArticles = articles.slice(currentArticle);
+        if (clients.length > 0 && remainingArticles.length > 0) {
+          clients[0].postMessage({
+            action: 'rateLimitReached',
+            remainingArticles: remainingArticles
+          });
+        }
+        break;
+      }
     }
   }
   
@@ -881,7 +1190,7 @@ async function handleShare(request) {
        <h2>✅ Article Added to Queue</h2>
        <p>The article has been added to your summarization queue.</p>
        <p>URL: ${sharedURL}</p>
-       <p><a href="./">View Queue</a> | <a href="javascript:window.close()">Close</a></p>
+       <p><a href="./index.html">View Queue</a> | <a href="javascript:window.close()">Close</a></p>
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
   }
@@ -905,6 +1214,17 @@ async function handleShare(request) {
        <a href="javascript:history.back()">← Back</a>
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
+  }
+
+  // Check rate limit before processing
+  const rateLimit = checkRateLimit(config.provider);
+  if (!rateLimit.allowed) {
+    return createErrorResponse(
+      new SummarizerError(
+        `API rate limit exceeded. Please try again after ${rateLimit.retryAfterSeconds} seconds.`,
+        ErrorType.RATE_LIMIT
+      )
+    );
   }
 
   // Standard single summarization flow with loading indicator
@@ -981,6 +1301,23 @@ function createErrorResponse(error) {
     ? getUserFriendlyErrorMessage(error)
     : `Error: ${error.message}`;
   
+  // Special handling for rate limit errors
+  let retrySection = '';
+  if (error instanceof SummarizerError && error.type === ErrorType.RATE_LIMIT) {
+    retrySection = `
+      <div style="margin-top: 1.5rem; padding: 1rem; background: #eff6ff; border-radius: 4px; color: #1e40af;">
+        <h3 style="margin-top: 0; color: #1e3a8a;">Rate Limit Information</h3>
+        <p>You've reached the usage limit for your current AI provider. You can:</p>
+        <ul>
+          <li>Wait a few minutes before trying again</li>
+          <li><a href="./landing.html" style="color: #2563eb;">Configure a different AI provider</a></li>
+          <li>Add this article to your queue for later processing</li>
+        </ul>
+        <button onclick="window.location.reload()" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; margin-top: 0.5rem; cursor: pointer;">Try Again</button>
+      </div>
+    `;
+  }
+  
   // Create helpful error page
   return new Response(`
     <!doctype html><html><head><meta charset="utf-8">
@@ -1001,6 +1338,8 @@ function createErrorResponse(error) {
       <h3 class="error-title">Failed to generate summary</h3>
       <p class="error-message">${errorMessage}</p>
     </div>
+    
+    ${retrySection}
     
     <div class="error-help">
       <h3>Troubleshooting tips:</h3>
