@@ -259,6 +259,82 @@
             font-weight: 500;
         }
 
+        /* Cache Settings */
+        .settings-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .settings-group h3 {
+            font-size: 1.1rem;
+            color: #1e293b;
+            margin: 0 0 1rem 0;
+        }
+
+        .form-row {
+            margin-bottom: 1rem;
+        }
+
+        .form-row label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: #475569;
+        }
+
+        .form-row select, .form-row input {
+            width: 100%;
+            padding: 0.7rem;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+            font-size: 1rem;
+            color: #1e293b;
+        }
+
+        .form-hint {
+            font-size: 0.85rem;
+            color: #64748b;
+            margin-top: 0.5rem;
+        }
+
+        .settings-group .button {
+            margin-top: 1rem;
+        }
+
+        .save-button {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 1rem;
+        }
+
+        .save-button:hover {
+            background: #059669;
+        }
+
+        /* Status messages */
+        .status-message {
+            margin: 1rem 0;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        .status-message.success {
+            background: #ecfdf5;
+            color: #047857;
+        }
+
+        .status-message.error {
+            background: #fef2f2;
+            color: #991b1b;
+        }
+
         @media (max-width: 640px) {
             .container {
                 padding: 1.5rem;
@@ -308,6 +384,47 @@
             </div>
             <div class="section-content" id="apiConfigContent">
                 <!-- Will be dynamically populated -->
+            </div>
+        </div>
+
+        <!-- Cache Settings Section -->
+        <div class="section expanded" id="cacheSettingsSection">
+            <div class="section-header" onclick="toggleSection('cacheSettingsSection')">
+                <h2>Cache Settings</h2>
+                <span class="toggle-icon">▼</span>
+            </div>
+            <div class="section-content">
+                <div class="settings-group">
+                    <h3>Summary Cache Duration</h3>
+                    <p class="form-hint">Control how long summaries are stored in the cache before being refreshed.</p>
+                    
+                    <div class="form-row">
+                        <label for="cacheDuration">Cache Duration:</label>
+                        <select id="cacheDuration">
+                            <option value="3600000">1 Hour</option>
+                            <option value="21600000">6 Hours</option>
+                            <option value="86400000" selected>1 Day (Default)</option>
+                            <option value="259200000">3 Days</option>
+                            <option value="604800000">1 Week</option>
+                            <option value="2592000000">1 Month</option>
+                            <option value="0">Never Expire</option>
+                        </select>
+                        <p class="form-hint">Shorter durations use more API credits but keep summaries fresh. Longer durations save API credits but may show outdated information.</p>
+                    </div>
+
+                    <div class="form-row">
+                        <label for="priorityMode">Cache Priority Mode:</label>
+                        <select id="priorityMode">
+                            <option value="recency" selected>Recency (Default)</option>
+                            <option value="frequency">Access Frequency</option>
+                            <option value="size">Space Efficiency</option>
+                        </select>
+                        <p class="form-hint">Recency keeps recent summaries. Frequency keeps frequently accessed summaries. Space Efficiency prioritizes smaller summaries.</p>
+                    </div>
+                    
+                    <button id="saveCacheSettings" class="save-button">Save Cache Settings</button>
+                    <div id="cacheSettingsStatus" class="status-message"></div>
+                </div>
             </div>
         </div>
 
@@ -585,8 +702,56 @@
             `;
         }
 
-        // Load API config on page load
+        /**
+         * Cache settings management
+         */
+        function loadCacheSettings() {
+            // Get current cache settings from localStorage or use defaults
+            const settingsString = localStorage.getItem('summarizer_cache_settings');
+            const settings = settingsString ? JSON.parse(settingsString) : {
+                cacheDuration: 24 * 60 * 60 * 1000, // 1 day default
+                priorityMode: 'recency'
+            };
+            
+            // Set form values
+            document.getElementById('cacheDuration').value = settings.cacheDuration.toString();
+            document.getElementById('priorityMode').value = settings.priorityMode;
+        }
+
+        function saveCacheSettings() {
+            const cacheDuration = parseInt(document.getElementById('cacheDuration').value);
+            const priorityMode = document.getElementById('priorityMode').value;
+            
+            // Save settings to localStorage
+            const settings = { cacheDuration, priorityMode };
+            localStorage.setItem('summarizer_cache_settings', JSON.stringify(settings));
+            
+            // Show success message
+            const statusElement = document.getElementById('cacheSettingsStatus');
+            statusElement.textContent = 'Settings saved successfully!';
+            statusElement.className = 'status-message success';
+            statusElement.style.display = 'block';
+            
+            // Hide message after 3 seconds
+            setTimeout(() => {
+                statusElement.style.display = 'none';
+            }, 3000);
+            
+            // If service worker is available, notify it about the settings change
+            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.controller.postMessage({
+                    action: 'updateCacheSettings',
+                    settings: settings
+                });
+            }
+        }
+
+        // Set up event listeners for cache settings
+        document.getElementById('saveCacheSettings').addEventListener('click', saveCacheSettings);
+
+        // Load settings on page load
         loadApiConfig();
+        loadCacheSettings();
     </script>
 </body>
 </html>
