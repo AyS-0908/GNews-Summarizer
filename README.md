@@ -24,6 +24,7 @@ The app includes ready-to-use code for:
 - Batch processing mode for multiple articles
 - Visual progress tracking for batch summarization
 - Comprehensive error handling with retry capabilities
+- Device-binding encryption for API key security
 - Intelligent error classification and user-friendly messages
 - 100% static, serverless architecture
 - No middleware required (direct API calls)
@@ -52,19 +53,26 @@ The app includes ready-to-use code for:
 
 ## API Key Security
 
-To protect your API keys while using this client-side application:
+The app implements multiple layers of security to protect your API keys:
 
-1. **Domain Restriction (Recommended)**: Configure your API keys to only work from this app's domain
-   - For OpenAI: Add domain restriction in the API key settings
-   - For Anthropic: Set "Restrict to one website" when creating the key
-   - For DeepSeek: Add domain restriction during key creation
+### Device-Binding Encryption
+- API keys are encrypted with a device-specific signature
+- The encryption key is derived from your device's unique characteristics including:
+  - Browser fingerprint
+  - Screen resolution
+  - Language settings
+  - Domain information
+  - Hardware details
+- The key can only be decrypted on the same device where it was configured
+- Even if your browser data is somehow accessed, the encrypted key is useless on other devices
 
-2. **Security Benefits**:
-   - Even if your API key is somehow exposed, it can't be used from other domains
-   - No backend server needed - zero maintenance cost while maintaining security
-   - Direct API communication for maximum performance
+### Security Benefits
+- Zero server dependency: No backend server needed
+- Persistent security: API key remains available after browser restarts
+- Device-locked: API key can't be used on other devices even if copied
+- No re-entry needed: You don't need to re-enter your API key for each session
 
-The setup page includes detailed instructions for configuring domain restrictions for each supported AI provider.
+The security settings page shows the current encryption status and information about your configuration.
 
 ## Troubleshooting
 
