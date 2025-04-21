@@ -1,16 +1,102 @@
 /* A service-worker that handles the /share POST,
    directly calls an AI API, then shows the AI's summary. */
 
-/* 1) Standard install / activate (boilerplate) */
-self.addEventListener('install',  evt => self.skipWaiting());
-self.addEventListener('activate', evt => self.clients.claim());
+/* Cache configuration */
+const CACHE_VERSION = 'v1';
+const SUMMARY_CACHE = `summary-cache-${CACHE_VERSION}`;
+const STATIC_CACHE = `static-cache-${CACHE_VERSION}`;
+// Default cache expiration time (24 hours)
+const CACHE_EXPIRATION = 24 * 60 * 60 * 1000;
+
+/* 1) Standard install / activate with cache management */
+self.addEventListener('install', evt => {
+  evt.waitUntil(
+    Promise.all([
+      caches.open(STATIC_CACHE).then(cache => {
+        // Cache static assets
+        return cache.addAll([
+          './',
+          './index.html',
+          './landing.html',
+          './settings.html',
+          './manifest.json',
+          './icon.svg',
+          './icon.png'
+        ]);
+      }),
+      self.skipWaiting()
+    ])
+  );
+});
+
+self.addEventListener('activate', evt => {
+  // Clean up old cache versions
+  evt.waitUntil(
+    caches.keys().then(cacheNames => {
+      return Promise.all(
+        cacheNames.map(cacheName => {
+          // Delete old caches that don't match current version
+          if (
+            cacheName.startsWith('summary-cache-') && cacheName !== SUMMARY_CACHE ||
+            cacheName.startsWith('static-cache-') && cacheName !== STATIC_CACHE
+          ) {
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    }).then(() => {
+      return self.clients.claim();
+    })
+  );
+});
 
 /* 2) Intercept fetches */
 self.addEventListener('fetch', event => {
   const {request} = event;
-  // Only catch our share_target POST
+  
+  // Handle share_target POST requests
   if (request.method === 'POST' && new URL(request.url).pathname === '/share') {
     event.respondWith(handleShare(request));
+    return;
+  }
+  
+  // Handle summary status checks
+  if (request.url.includes('summary-status') && request.method === 'GET') {
+    const url = new URL(request.url).searchParams.get('url');
+    if (url) {
+      event.respondWith(checkSummaryStatus(url));
+      return;
+    }
+  }
+  
+  // Handle summarize API calls
+  if (request.url.includes('/api/summarize') && request.method === 'GET') {
+    const url = new URL(request.url).searchParams.get('url');
+    if (url) {
+      event.respondWith(handleApiSummarize(url));
+      return;
+    }
+  }
+  
+  // For normal page requests, use cache-first strategy
+  if (request.method === 'GET') {
+    event.respondWith(
+      caches.match(request).then(cachedResponse => {
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        return fetch(request).then(response => {
+          // Cache successful responses for static assets
+          if (response.ok && request.url.match(/\.(html|css|js|json|svg|png|jpg|jpeg|gif|webp)$/)) {
+            const responseClone = response.clone();
+            caches.open(STATIC_CACHE).then(cache => {
+              cache.put(request, responseClone);
+            });
+          }
+          return response;
+        });
+      })
+    );
   }
 });
 
@@ -37,8 +123,195 @@ self.addEventListener('message', async event => {
         results: results
       });
     }
+  } else if (event.data.action === 'clearCache') {
+    // Clear summary cache when requested
+    clearSummaryCache().then(result => {
+      if (event.source) {
+        event.source.postMessage({
+          action: 'cacheClearedResult',
+          success: result
+        });
+      }
+    });
   }
 });
+
+/**
+ * Cache management functions
+ */
+
+/**
+ * Generates a cache key for an article URL
+ * @param {string} url - Article URL
+ * @returns {string} Cache key
+ */
+function generateCacheKey(url) {
+  // Use a simple hash function for the URL
+  let hash = 0;
+  for (let i = 0; i < url.length; i++) {
+    const char = url.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0; // Convert to 32-bit integer
+  }
+  return `summary-${hash}`;
+}
+
+/**
+ * Stores a summary in the cache with timestamp
+ * @param {string} url - Article URL
+ * @param {string} summary - Summary text
+ * @returns {Promise<boolean>} Success status
+ */
+async function cacheSummary(url, summary) {
+  try {
+    const cache = await caches.open(SUMMARY_CACHE);
+    const cacheKey = generateCacheKey(url);
+    
+    // Create a response object with the summary and metadata
+    const data = {
+      summary: summary,
+      url: url,
+      timestamp: Date.now(),
+      version: CACHE_VERSION
+    };
+    
+    const response = new Response(JSON.stringify(data), {
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Cache-Date': new Date().toISOString()
+      }
+    });
+    
+    await cache.put(cacheKey, response);
+    return true;
+  } catch (error) {
+    console.error('Cache storage failed:', error);
+    return false;
+  }
+}
+
+/**
+ * Retrieves a summary from cache if available and not expired
+ * @param {string} url - Article URL
+ * @param {number} maxAge - Maximum age in milliseconds (default: CACHE_EXPIRATION)
+ * @returns {Promise<string|null>} Summary text or null if not found/expired
+ */
+async function getCachedSummary(url, maxAge = CACHE_EXPIRATION) {
+  try {
+    const cache = await caches.open(SUMMARY_CACHE);
+    const cacheKey = generateCacheKey(url);
+    const cached = await cache.match(cacheKey);
+    
+    if (!cached) return null;
+    
+    const data = await cached.json();
+    
+    // Check if cache is expired
+    const now = Date.now();
+    if (now - data.timestamp > maxAge) {
+      // Cache expired, delete it
+      await cache.delete(cacheKey);
+      return null;
+    }
+    
+    return data.summary;
+  } catch (error) {
+    console.error('Cache retrieval failed:', error);
+    return null;
+  }
+}
+
+/**
+ * Checks if a summary exists in cache and is valid
+ * @param {string} url - Article URL
+ * @returns {Promise<Response>} Response indicating if summary is ready
+ */
+async function checkSummaryStatus(url) {
+  const summary = await getCachedSummary(url);
+  
+  if (summary) {
+    return new Response(JSON.stringify({ ready: true }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  
+  return new Response(JSON.stringify({ ready: false }), {
+    status: 202,
+    headers: { 'Content-Type': 'application/json' }
+  });
+}
+
+/**
+ * Handles API summarize requests, using cache when available
+ * @param {string} url - Article URL
+ * @returns {Promise<Response>} JSON response with summary
+ */
+async function handleApiSummarize(url) {
+  try {
+    // Try to get from cache first
+    const cachedSummary = await getCachedSummary(url);
+    
+    if (cachedSummary) {
+      return new Response(JSON.stringify({ 
+        summary: cachedSummary, 
+        cached: true 
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    // Not in cache, generate summary
+    const config = await getConfig();
+    if (!config) {
+      return new Response(JSON.stringify({ 
+        error: 'No AI provider configured' 
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    const summary = await getSummary(url, config);
+    
+    // Cache the result
+    await cacheSummary(url, summary);
+    
+    return new Response(JSON.stringify({ 
+      summary: summary, 
+      cached: false 
+    }), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    const errorMessage = error instanceof SummarizerError 
+      ? getUserFriendlyErrorMessage(error)
+      : `Error: ${error.message}`;
+      
+    return new Response(JSON.stringify({ 
+      error: errorMessage,
+      errorType: error instanceof SummarizerError ? error.type : ErrorType.UNKNOWN
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}
+
+/**
+ * Clears the summary cache
+ * @returns {Promise<boolean>} Success status
+ */
+async function clearSummaryCache() {
+  try {
+    await caches.delete(SUMMARY_CACHE);
+    // Re-create the cache
+    await caches.open(SUMMARY_CACHE);
+    return true;
+  } catch (error) {
+    console.error('Failed to clear cache:', error);
+    return false;
+  }
+}
 
 /**
  * Security utility functions for API key decryption
@@ -345,6 +618,12 @@ async function getSummary(url, config) {
     throw new SummarizerError('Invalid article URL', ErrorType.INVALID_URL);
   }
   
+  // Check cache first
+  const cachedSummary = await getCachedSummary(url);
+  if (cachedSummary) {
+    return cachedSummary;
+  }
+  
   // Validate API key
   if (!config.apiKey || config.apiKey.trim() === '') {
     throw new SummarizerError('API key is missing or invalid', ErrorType.API_KEY);
@@ -470,6 +749,9 @@ async function getSummary(url, config) {
       throw new SummarizerError('Empty summary returned', ErrorType.UNKNOWN);
     }
     
+    // Cache the successful result
+    await cacheSummary(url, summaryText);
+    
     return summaryText;
   } catch (error) {
     // Classify and rethrow the error
@@ -503,11 +785,19 @@ async function processBatchArticles(articles) {
         });
       }
       
-      const summary = await getSummary(article.url, config);
+      // Check cache first, then fallback to API call
+      let summary = await getCachedSummary(article.url);
+      let fromCache = !!summary;
+      
+      if (!summary) {
+        summary = await getSummary(article.url, config);
+      }
+      
       results.push({
         url: article.url,
         summary: summary,
-        success: true
+        success: true,
+        fromCache: fromCache
       });
     } catch (error) {
       // Use friendly error messages
@@ -592,6 +882,27 @@ async function handleShare(request) {
        <p>The article has been added to your summarization queue.</p>
        <p>URL: ${sharedURL}</p>
        <p><a href="./">View Queue</a> | <a href="javascript:window.close()">Close</a></p>
+       </body></html>`,
+       { headers:{'Content-Type':'text/html'} });
+  }
+
+  // Check if a cached summary is available
+  const cachedSummary = await getCachedSummary(sharedURL);
+  if (cachedSummary) {
+    // Return cached summary immediately
+    return new Response(`
+       <!doctype html><html><head><meta charset="utf-8">
+       <title>AI Summary (Cached)</title><style>
+          body{font-family:sans-serif;padding:2rem;line-height:1.4}
+          pre{white-space:pre-wrap}
+          .cache-notice{color:#6b7280;font-size:0.9rem;margin-bottom:1rem}
+          .refresh-btn{background:#4F46E5;color:white;border:none;border-radius:4px;padding:0.5rem 1rem;cursor:pointer;margin-top:1rem}
+          .refresh-btn:hover{background:#4338ca}
+       </style></head><body>
+       <h2>✅ Summary ready</h2>
+       <div class="cache-notice">This summary was retrieved from cache. <button class="refresh-btn" onclick="location.href='./api/summarize?url=${encodeURIComponent(sharedURL)}&refresh=true'">Generate Fresh Summary</button></div>
+       <pre>${cachedSummary}</pre>
+       <a href="javascript:history.back()">← Back</a>
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
   }
