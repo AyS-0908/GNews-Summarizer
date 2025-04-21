@@ -123,6 +123,12 @@ self.addEventListener('fetch', event => {
             });
           }
           return response;
+        }).catch(error => {
+          // For offline scenarios, try to serve an offline version of the page
+          if (request.url.includes('/index.html')) {
+            return caches.match('./index.html');
+          }
+          throw error;
         });
       })
     );
@@ -217,6 +223,60 @@ self.addEventListener('message', async event => {
           });
         }
       }
+    }
+  } 
+  // NEW: Handle cache listing request
+  else if (messageAction === 'listCachedSummaries') {
+    try {
+      const summaries = await listCachedSummaries();
+      if (event.source) {
+        event.source.postMessage({
+          action: 'cachedSummariesList',
+          summaries: summaries
+        });
+      }
+    } catch (error) {
+      console.error('Failed to list cached summaries:', error);
+      if (event.source) {
+        event.source.postMessage({
+          action: 'cachedSummariesList',
+          summaries: [],
+          error: error.message
+        });
+      }
+    }
+  }
+  // NEW: Handle selective deletion of cached summary
+  else if (messageAction === 'deleteCachedSummary') {
+    try {
+      const url = event.data.url;
+      const success = await deleteCachedSummary(url);
+      if (event.source) {
+        event.source.postMessage({
+          action: 'cachedSummaryDeleted',
+          url: url,
+          success: success
+        });
+      }
+    } catch (error) {
+      console.error('Failed to delete cached summary:', error);
+      if (event.source) {
+        event.source.postMessage({
+          action: 'cachedSummaryDeleted',
+          url: event.data.url,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+  }
+  // Check network status
+  else if (messageAction === 'checkNetworkStatus') {
+    if (event.source) {
+      event.source.postMessage({
+        action: 'networkStatus',
+        online: self.navigator.onLine
+      });
     }
   }
 });
@@ -313,10 +373,34 @@ async function cacheSummary(url, summary) {
     const cache = await caches.open(SUMMARY_CACHE);
     const cacheKey = generateCacheKey(url);
     
+    // Extract domain from URL for better display
+    let domain = '';
+    try {
+      const urlObj = new URL(url);
+      domain = urlObj.hostname;
+    } catch (e) {
+      domain = 'unknown-domain';
+    }
+    
+    // Generate a title from URL
+    let title = '';
+    try {
+      const urlObj = new URL(url);
+      // Use the last path segment or domain if not available
+      title = urlObj.pathname.split('/').filter(Boolean).pop() || domain;
+      // Clean it up
+      title = title.replace(/-/g, ' ').replace(/\.(html|php|asp|jsp)$/, '');
+      title = title.charAt(0).toUpperCase() + title.slice(1);
+    } catch (e) {
+      title = 'Article';
+    }
+    
     // Create a response object with the summary and metadata
     const data = {
       summary: summary,
       url: url,
+      domain: domain,
+      title: title,
       timestamp: Date.now(),
       version: CACHE_VERSION,
       accessCount: 1, // Track access frequency for prioritization
@@ -392,6 +476,91 @@ async function getCachedSummary(url, maxAge = null) {
 }
 
 /**
+ * Lists all cached summaries with metadata
+ * @returns {Promise<Array>} Array of summary objects with metadata
+ */
+async function listCachedSummaries() {
+  try {
+    const cache = await caches.open(SUMMARY_CACHE);
+    const requests = await cache.keys();
+    const summaries = [];
+    
+    for (const request of requests) {
+      try {
+        // Get the response from cache
+        const response = await cache.match(request);
+        if (!response) continue;
+        
+        // Parse the JSON data
+        const data = await response.json();
+        
+        // Create a preview text (first 150 chars)
+        const previewText = data.summary.substring(0, 150) + (data.summary.length > 150 ? '...' : '');
+        
+        // Add to results
+        summaries.push({
+          url: data.url,
+          title: data.title || 'Untitled',
+          domain: data.domain || extractDomain(data.url),
+          timestamp: data.timestamp,
+          accessCount: data.accessCount || 1,
+          size: data.size || data.summary.length,
+          previewText: previewText
+        });
+      } catch (error) {
+        console.error('Error processing cached item:', error);
+        // Skip this item and continue
+      }
+    }
+    
+    // Sort by timestamp (most recent first)
+    summaries.sort((a, b) => b.timestamp - a.timestamp);
+    
+    return summaries;
+  } catch (error) {
+    console.error('Failed to list cached summaries:', error);
+    return [];
+  }
+}
+
+/**
+ * Helper function to extract domain from URL
+ * @param {string} url - URL to extract domain from
+ * @returns {string} Domain name
+ */
+function extractDomain(url) {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname;
+  } catch (e) {
+    return 'unknown-domain';
+  }
+}
+
+/**
+ * Delete a specific cached summary
+ * @param {string} url - URL of the article to delete
+ * @returns {Promise<boolean>} Success status
+ */
+async function deleteCachedSummary(url) {
+  try {
+    const cache = await caches.open(SUMMARY_CACHE);
+    const cacheKey = generateCacheKey(url);
+    
+    // Check if it exists first
+    const exists = await cache.match(cacheKey);
+    if (!exists) return false;
+    
+    // Delete the cache entry
+    const result = await cache.delete(cacheKey);
+    return result;
+  } catch (error) {
+    console.error('Failed to delete cached summary:', error);
+    return false;
+  }
+}
+
+/**
  * Checks if a summary exists in cache and is valid
  * @param {string} url - Article URL
  * @returns {Promise<Response>} Response indicating if summary is ready
@@ -450,6 +619,19 @@ async function handleApiSummarize(url) {
           headers: { 'Content-Type': 'application/json' }
         });
       }
+    }
+    
+    // If offline, return an error about offline status
+    if (!self.navigator.onLine) {
+      return new Response(JSON.stringify({ 
+        error: 'You are currently offline. Please reconnect to summarize new articles.', 
+        errorType: ErrorType.NETWORK,
+        severity: ErrorSeverity.TEMPORARY,
+        troubleshooting: getTroubleshooting(ErrorType.NETWORK)
+      }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
     
     // Not in cache, generate summary
@@ -1693,6 +1875,14 @@ async function processBatchArticles(articles) {
       let fromCache = !!summary;
       
       if (!summary) {
+        // Check online status
+        if (!self.navigator.onLine) {
+          throw new SummarizerError(
+            'You are currently offline. Please connect to the internet to process new articles.',
+            ErrorType.NETWORK
+          );
+        }
+        
         // Check if we're hitting rate limits before making API call
         const rateLimit = checkRateLimit(config.provider);
         if (!rateLimit.allowed) {
@@ -1929,6 +2119,16 @@ async function handleShare(request) {
        { headers:{'Content-Type':'text/html'} });
   }
 
+  // Check if offline
+  if (!self.navigator.onLine) {
+    return createErrorResponse(
+      new SummarizerError(
+        'You are currently offline. Only cached summaries are available while offline.',
+        ErrorType.NETWORK
+      )
+    );
+  }
+
   // Check rate limit before processing
   const rateLimit = checkRateLimit(config.provider);
   if (!rateLimit.allowed) {
@@ -2083,9 +2283,31 @@ async function handleShare(request) {
            }
          }
          
+         // Handle network status changes
+         function handleNetworkChange() {
+           if (!navigator.onLine) {
+             showError({
+               title: 'Offline Mode',
+               message: 'You are currently offline. Only cached summaries are available.'
+             });
+           } else if (errorContainer && errorContainer.style.display === 'block') {
+             // If error was shown due to offline, allow retry
+             checkSummaryProgress();
+           }
+         }
+         
+         // Setup network status listeners
+         window.addEventListener('online', handleNetworkChange);
+         window.addEventListener('offline', handleNetworkChange);
+         
          // Start checking progress when page loads
          document.addEventListener('DOMContentLoaded', () => {
-           checkSummaryProgress();
+           // Check network status first
+           if (!navigator.onLine) {
+             handleNetworkChange();
+           } else {
+             checkSummaryProgress();
+           }
          });
        </script>
        </head><body>
