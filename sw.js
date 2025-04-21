@@ -192,12 +192,99 @@ self.addEventListener('message', async event => {
         progress: progress
       });
     }
+  } else if (messageAction === 'updateCacheSettings') {
+    // Handle cache settings update from the settings page
+    if (event.data.settings) {
+      try {
+        // Store the settings in a local variable for immediate use
+        // (future requests will use these settings)
+        handleCacheSettingsUpdate(event.data.settings);
+        
+        // Respond with success
+        if (event.source) {
+          event.source.postMessage({
+            action: 'cacheSettingsUpdated',
+            success: true
+          });
+        }
+      } catch (error) {
+        console.error('Failed to update cache settings:', error);
+        if (event.source) {
+          event.source.postMessage({
+            action: 'cacheSettingsUpdated',
+            success: false,
+            error: error.message
+          });
+        }
+      }
+    }
   }
 });
 
 /**
  * Cache management functions
  */
+
+/**
+ * Get the current cache settings
+ * @returns {Object} Cache settings
+ */
+function getCacheSettings() {
+  try {
+    // Try to get settings from localStorage (through client)
+    const settings = self._cacheSettings; // Use in-memory settings if available
+    
+    if (settings) {
+      return settings;
+    }
+    
+    // Otherwise use defaults
+    return {
+      cacheDuration: CACHE_EXPIRATION, // Default to 24 hours
+      priorityMode: 'recency' // Default to recency-based prioritization
+    };
+  } catch (error) {
+    console.error('Error getting cache settings:', error);
+    return {
+      cacheDuration: CACHE_EXPIRATION,
+      priorityMode: 'recency'
+    };
+  }
+}
+
+/**
+ * Handle cache settings update
+ * @param {Object} settings - New cache settings
+ */
+function handleCacheSettingsUpdate(settings) {
+  // Validate settings
+  if (!settings || typeof settings !== 'object') {
+    throw new Error('Invalid cache settings');
+  }
+  
+  // Validate cacheDuration (must be a number)
+  if (settings.cacheDuration !== undefined && 
+      (typeof settings.cacheDuration !== 'number' || settings.cacheDuration < 0)) {
+    throw new Error('Invalid cache duration');
+  }
+  
+  // Validate priorityMode (must be one of the supported modes)
+  if (settings.priorityMode !== undefined && 
+      !['recency', 'frequency', 'size'].includes(settings.priorityMode)) {
+    throw new Error('Invalid priority mode');
+  }
+  
+  // Store settings in memory for service worker use
+  self._cacheSettings = {
+    cacheDuration: settings.cacheDuration !== undefined ? settings.cacheDuration : CACHE_EXPIRATION,
+    priorityMode: settings.priorityMode || 'recency'
+  };
+  
+  console.log('Cache settings updated:', self._cacheSettings);
+  
+  // Return success
+  return true;
+}
 
 /**
  * Generates a cache key for an article URL
@@ -231,7 +318,9 @@ async function cacheSummary(url, summary) {
       summary: summary,
       url: url,
       timestamp: Date.now(),
-      version: CACHE_VERSION
+      version: CACHE_VERSION,
+      accessCount: 1, // Track access frequency for prioritization
+      size: summary.length // Track size for size-based prioritization
     };
     
     const response = new Response(JSON.stringify(data), {
@@ -252,11 +341,17 @@ async function cacheSummary(url, summary) {
 /**
  * Retrieves a summary from cache if available and not expired
  * @param {string} url - Article URL
- * @param {number} maxAge - Maximum age in milliseconds (default: CACHE_EXPIRATION)
+ * @param {number} maxAge - Maximum age in milliseconds (default: dynamic from settings)
  * @returns {Promise<string|null>} Summary text or null if not found/expired
  */
-async function getCachedSummary(url, maxAge = CACHE_EXPIRATION) {
+async function getCachedSummary(url, maxAge = null) {
   try {
+    // Get current cache settings
+    const settings = getCacheSettings();
+    
+    // Use provided maxAge or get from settings
+    const cacheExpiration = maxAge !== null ? maxAge : settings.cacheDuration;
+    
     const cache = await caches.open(SUMMARY_CACHE);
     const cacheKey = generateCacheKey(url);
     const cached = await cache.match(cacheKey);
@@ -265,12 +360,28 @@ async function getCachedSummary(url, maxAge = CACHE_EXPIRATION) {
     
     const data = await cached.json();
     
-    // Check if cache is expired
+    // Check if cache is expired (unless expiration is set to 0 = never expire)
     const now = Date.now();
-    if (now - data.timestamp > maxAge) {
+    if (cacheExpiration !== 0 && now - data.timestamp > cacheExpiration) {
       // Cache expired, delete it
       await cache.delete(cacheKey);
       return null;
+    }
+    
+    // Update access count and timestamp if using frequency-based prioritization
+    if (settings.priorityMode === 'frequency') {
+      data.accessCount = (data.accessCount || 0) + 1;
+      data.lastAccessed = now;
+      
+      // Store updated metadata
+      const updatedResponse = new Response(JSON.stringify(data), {
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Cache-Date': new Date().toISOString()
+        }
+      });
+      
+      await cache.put(cacheKey, updatedResponse);
     }
     
     return data.summary;
@@ -321,16 +432,24 @@ async function checkSummaryStatus(url) {
  */
 async function handleApiSummarize(url) {
   try {
-    // Try to get from cache first
-    const cachedSummary = await getCachedSummary(url);
+    // Check if the refresh parameter is set to force a fresh summary
+    const urlObj = new URL(self.location.origin + '/api/summarize');
+    const params = new URL(url, self.location.origin).searchParams;
+    const refreshParam = params.get('refresh');
+    const forceRefresh = refreshParam === 'true';
     
-    if (cachedSummary) {
-      return new Response(JSON.stringify({ 
-        summary: cachedSummary, 
-        cached: true 
-      }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
+    // Try to get from cache first if not forcing refresh
+    if (!forceRefresh) {
+      const cachedSummary = await getCachedSummary(url);
+      
+      if (cachedSummary) {
+        return new Response(JSON.stringify({ 
+          summary: cachedSummary, 
+          cached: true 
+        }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
     }
     
     // Not in cache, generate summary
@@ -1707,7 +1826,7 @@ async function handleShare(request) {
   // Check if a cached summary is available
   const cachedSummary = await getCachedSummary(sharedURL);
   if (cachedSummary) {
-    // Return cached summary immediately
+    // Return cached summary immediately with sharing options
     return new Response(`
        <!doctype html><html><head><meta charset="utf-8">
        <title>AI Summary (Cached)</title><style>
@@ -1716,11 +1835,96 @@ async function handleShare(request) {
           .cache-notice{color:#6b7280;font-size:0.9rem;margin-bottom:1rem}
           .refresh-btn{background:#4F46E5;color:white;border:none;border-radius:4px;padding:0.5rem 1rem;cursor:pointer;margin-top:1rem}
           .refresh-btn:hover{background:#4338ca}
-       </style></head><body>
+          .action-bar{display:flex;gap:0.5rem;margin-top:1.5rem;flex-wrap:wrap}
+          .action-button{display:inline-flex;align-items:center;gap:0.5rem;background:#f1f5f9;color:#475569;border:none;padding:0.5rem 1rem;border-radius:6px;font-size:0.9rem;cursor:pointer;text-decoration:none}
+          .action-button:hover{background:#e2e8f0;color:#1e293b}
+          .action-button svg{width:16px;height:16px}
+          @media (max-width: 600px) {
+            .action-bar{flex-direction:column}
+            .action-button{width:100%;justify-content:center}
+          }
+       </style>
+       <script>
+         // Copy to clipboard function
+         function copyToClipboard() {
+           const summaryText = document.getElementById('summaryText').innerText;
+           const url = "${sharedURL}";
+           const textToCopy = "Summary of: " + url + "\\n\\n" + summaryText;
+           
+           navigator.clipboard.writeText(textToCopy)
+             .then(() => {
+               const button = document.getElementById('copyButton');
+               const originalText = button.innerText;
+               button.innerText = 'Copied!';
+               setTimeout(() => {
+                 button.innerText = originalText;
+               }, 2000);
+             })
+             .catch(err => {
+               alert('Failed to copy: ' + err);
+             });
+         }
+         
+         // Share function
+         function shareSummary() {
+           const summaryText = document.getElementById('summaryText').innerText;
+           const url = "${sharedURL}";
+           
+           if (navigator.share) {
+             navigator.share({
+               title: 'AI Summary',
+               text: summaryText,
+               url: url
+             })
+             .catch(err => {
+               console.error('Share failed:', err);
+               copyToClipboard();
+               alert('Sharing failed. Summary copied to clipboard instead!');
+             });
+           } else {
+             copyToClipboard();
+             alert('Web Share not supported. Summary copied to clipboard instead!');
+           }
+         }
+       </script>
+       </head><body>
        <h2>✅ Summary ready</h2>
        <div class="cache-notice">This summary was retrieved from cache. <button class="refresh-btn" onclick="location.href='./api/summarize?url=${encodeURIComponent(sharedURL)}&refresh=true'">Generate Fresh Summary</button></div>
-       <pre>${cachedSummary}</pre>
-       <a href="javascript:history.back()">← Back</a>
+       <pre id="summaryText">${cachedSummary}</pre>
+       
+       <div class="action-bar">
+         <button onclick="shareSummary()" class="action-button">
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <circle cx="18" cy="5" r="3"></circle>
+             <circle cx="6" cy="12" r="3"></circle>
+             <circle cx="18" cy="19" r="3"></circle>
+             <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+             <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+           </svg>
+           Share Summary
+         </button>
+         
+         <button id="copyButton" onclick="copyToClipboard()" class="action-button">
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+           </svg>
+           Copy to Clipboard
+         </button>
+         
+         <a href="${sharedURL}" target="_blank" class="action-button">
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+             <polyline points="15 3 21 3 21 9"></polyline>
+             <line x1="10" y1="14" x2="21" y2="3"></line>
+           </svg>
+           Open Original Article
+         </a>
+       </div>
+       
+       <p style="margin-top:2rem">
+         <a href="javascript:history.back()">← Back</a>
+       </p>
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
   }
@@ -1910,18 +2114,105 @@ async function handleShare(request) {
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
 
+    // This part is never reached due to the return above, 
+    // but is logically part of the function for clarity
     const summaryText = await getSummary(sharedURL, config);
 
-    // Simple HTML response shown to the user
+    // Response updated to include sharing options
     return new Response(`
        <!doctype html><html><head><meta charset="utf-8">
        <title>AI Summary</title><style>
           body{font-family:sans-serif;padding:2rem;line-height:1.4}
           pre{white-space:pre-wrap}
-       </style></head><body>
+          .action-bar{display:flex;gap:0.5rem;margin-top:1.5rem;flex-wrap:wrap}
+          .action-button{display:inline-flex;align-items:center;gap:0.5rem;background:#f1f5f9;color:#475569;border:none;padding:0.5rem 1rem;border-radius:6px;font-size:0.9rem;cursor:pointer;text-decoration:none}
+          .action-button:hover{background:#e2e8f0;color:#1e293b}
+          .action-button svg{width:16px;height:16px}
+          @media (max-width: 600px) {
+            .action-bar{flex-direction:column}
+            .action-button{width:100%;justify-content:center}
+          }
+       </style>
+       <script>
+         // Copy to clipboard function
+         function copyToClipboard() {
+           const summaryText = document.getElementById('summaryText').innerText;
+           const url = "${sharedURL}";
+           const textToCopy = "Summary of: " + url + "\\n\\n" + summaryText;
+           
+           navigator.clipboard.writeText(textToCopy)
+             .then(() => {
+               const button = document.getElementById('copyButton');
+               const originalText = button.innerText;
+               button.innerText = 'Copied!';
+               setTimeout(() => {
+                 button.innerText = originalText;
+               }, 2000);
+             })
+             .catch(err => {
+               alert('Failed to copy: ' + err);
+             });
+         }
+         
+         // Share function
+         function shareSummary() {
+           const summaryText = document.getElementById('summaryText').innerText;
+           const url = "${sharedURL}";
+           
+           if (navigator.share) {
+             navigator.share({
+               title: 'AI Summary',
+               text: summaryText,
+               url: url
+             })
+             .catch(err => {
+               console.error('Share failed:', err);
+               copyToClipboard();
+               alert('Sharing failed. Summary copied to clipboard instead!');
+             });
+           } else {
+             copyToClipboard();
+             alert('Web Share not supported. Summary copied to clipboard instead!');
+           }
+         }
+       </script>
+       </head><body>
        <h2>✅ Summary ready</h2>
        <pre id="summaryText">${summaryText}</pre>
-       <a href="javascript:history.back()">← Back</a>
+       
+       <div class="action-bar">
+         <button onclick="shareSummary()" class="action-button">
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <circle cx="18" cy="5" r="3"></circle>
+             <circle cx="6" cy="12" r="3"></circle>
+             <circle cx="18" cy="19" r="3"></circle>
+             <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+             <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+           </svg>
+           Share Summary
+         </button>
+         
+         <button id="copyButton" onclick="copyToClipboard()" class="action-button">
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+           </svg>
+           Copy to Clipboard
+         </button>
+         
+         <a href="${sharedURL}" target="_blank" class="action-button">
+           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+             <polyline points="15 3 21 3 21 9"></polyline>
+             <line x1="10" y1="14" x2="21" y2="3"></line>
+           </svg>
+           Open Original Article
+         </a>
+       </div>
+       
+       <p style="margin-top:2rem">
+         <a href="javascript:history.back()">← Back</a>
+       </p>
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
   } catch (error) {
@@ -1976,8 +2267,8 @@ function createErrorResponse(error) {
         <h3>Options</h3>
         <p>While waiting for rate limits to reset, you can:</p>
         <div class="action-buttons">
-          <button onclick="window.location.href='./index.html?queue=true&url=${encodeURIComponent(error.url || '')}';" class="action-button">Add to Queue</button>
-          <button onclick="window.location.href='./landing.html';" class="action-button secondary">Try Another Provider</button>
+          <button onclick="window.location.href='./index.html?queue=true&url=${encodeURIComponent(error.url || '')}'" class="action-button">Add to Queue</button>
+          <button onclick="window.location.href='./landing.html'" class="action-button secondary">Try Another Provider</button>
         </div>
       </div>
     `;
