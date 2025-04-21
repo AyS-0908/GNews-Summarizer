@@ -136,6 +136,28 @@
       background: #fef2f2;
       color: #991b1b;
     }
+    .error-item {
+      border-left: 4px solid #ef4444;
+    }
+    .error-message {
+      background: #fef2f2;
+      padding: 1rem;
+      border-radius: 4px;
+      margin: 1rem 0;
+      color: #991b1b;
+    }
+    .retry-button {
+      background: #4F46E5;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 0.5rem;
+    }
+    .retry-button:hover {
+      background: #4338ca;
+    }
     #batchResults {
       text-align: left;
       margin-top: 2rem;
@@ -295,14 +317,31 @@
       updateQueueUI();
     }
 
-    function showStatus(message, type) {
+    function showStatus(message, type, duration = 3000) {
       const statusElement = document.getElementById('statusMessage');
       statusElement.textContent = message;
       statusElement.className = `status-message ${type}`;
       statusElement.style.display = 'block';
-      setTimeout(() => {
-        statusElement.style.display = 'none';
-      }, 3000);
+      
+      // Only auto-hide success messages, keep errors visible
+      if (type === 'success' && duration > 0) {
+        setTimeout(() => {
+          statusElement.style.display = 'none';
+        }, duration);
+      } else if (type === 'error') {
+        // Add close button for errors
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = '\u00d7';
+        closeBtn.style.float = 'right';
+        closeBtn.style.background = 'none';
+        closeBtn.style.border = 'none';
+        closeBtn.style.fontSize = '20px';
+        closeBtn.style.cursor = 'pointer';
+        closeBtn.style.marginTop = '-5px';
+        closeBtn.onclick = () => statusElement.style.display = 'none';
+        
+        statusElement.prepend(closeBtn);
+      }
     }
     
     // Show processing status
@@ -363,6 +402,7 @@
         })
         .catch(error => {
           console.error('Service Worker registration failed:', error);
+          showStatus('Failed to initialize offline functionality. Please check your browser settings.', 'error');
         });
       
       // Handle messages from service worker
@@ -413,24 +453,43 @@
           const resultsDiv = document.getElementById('batchResults');
           resultsDiv.innerHTML = '';
           
+          // Check if there are any errors in the results
+          const hasErrors = event.data.results && event.data.results.some(result => !result.success);
+          
+          if (hasErrors) {
+            showStatus('Some articles couldn\'t be summarized. See details below.', 'error', 0);
+          } else {
+            showStatus('All summaries generated successfully!', 'success');
+          }
+          
           if (event.data.results && event.data.results.length > 0) {
             event.data.results.forEach((result, index) => {
               const summaryDiv = document.createElement('div');
-              summaryDiv.className = 'summary-item';
-              summaryDiv.innerHTML = `
-                <h3>Article ${index + 1}</h3>
-                <a href="${result.url}" target="_blank">${result.url}</a>
-                <pre>${result.summary}</pre>
-              `;
+              summaryDiv.className = result.success ? 'summary-item' : 'summary-item error-item';
+              
+              // Add error styling if needed
+              if (!result.success) {
+                summaryDiv.innerHTML = `
+                  <h3>Article ${index + 1} - Failed</h3>
+                  <a href="${result.url}" target="_blank">${result.url}</a>
+                  <div class="error-message">${result.summary}</div>
+                  <button class="retry-button" data-url="${result.url}">Try Again</button>
+                `;
+              } else {
+                summaryDiv.innerHTML = `
+                  <h3>Article ${index + 1}</h3>
+                  <a href="${result.url}" target="_blank">${result.url}</a>
+                  <pre>${result.summary}</pre>
+                `;
+              }
               resultsDiv.appendChild(summaryDiv);
             });
             
-            // Clear queue after successful processing
+            // Clear queue after processing
             const queue = getQueue();
             queue.articles = [];
             saveQueue(queue);
             updateQueueUI();
-            showStatus('All summaries generated successfully!', 'success');
           }
         }
       });
@@ -444,6 +503,27 @@
       const queue = getQueue();
       document.getElementById('queueModeToggle').checked = queue.queueMode;
       updateQueueUI();
+      
+      // Add event delegation for retry buttons
+      document.getElementById('batchResults').addEventListener('click', event => {
+        if (event.target.classList.contains('retry-button')) {
+          const url = event.target.getAttribute('data-url');
+          if (url) {
+            // Add back to queue
+            const queue = getQueue();
+            queue.articles.push({
+              url: url,
+              timestamp: new Date().toISOString()
+            });
+            saveQueue(queue);
+            updateQueueUI();
+            showStatus('Article added back to queue for retry', 'success');
+            event.target.parentElement.remove();
+          }
+        }
+      });
+    } else {
+      showStatus('Service Worker not supported in your browser. Some features may not work.', 'error');
     }
   </script>
 </body>
