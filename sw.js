@@ -2113,108 +2113,6 @@ async function handleShare(request) {
        </div>
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
-
-    // This part is never reached due to the return above, 
-    // but is logically part of the function for clarity
-    const summaryText = await getSummary(sharedURL, config);
-
-    // Response updated to include sharing options
-    return new Response(`
-       <!doctype html><html><head><meta charset="utf-8">
-       <title>AI Summary</title><style>
-          body{font-family:sans-serif;padding:2rem;line-height:1.4}
-          pre{white-space:pre-wrap}
-          .action-bar{display:flex;gap:0.5rem;margin-top:1.5rem;flex-wrap:wrap}
-          .action-button{display:inline-flex;align-items:center;gap:0.5rem;background:#f1f5f9;color:#475569;border:none;padding:0.5rem 1rem;border-radius:6px;font-size:0.9rem;cursor:pointer;text-decoration:none}
-          .action-button:hover{background:#e2e8f0;color:#1e293b}
-          .action-button svg{width:16px;height:16px}
-          @media (max-width: 600px) {
-            .action-bar{flex-direction:column}
-            .action-button{width:100%;justify-content:center}
-          }
-       </style>
-       <script>
-         // Copy to clipboard function
-         function copyToClipboard() {
-           const summaryText = document.getElementById('summaryText').innerText;
-           const url = "${sharedURL}";
-           const textToCopy = "Summary of: " + url + "\\n\\n" + summaryText;
-           
-           navigator.clipboard.writeText(textToCopy)
-             .then(() => {
-               const button = document.getElementById('copyButton');
-               const originalText = button.innerText;
-               button.innerText = 'Copied!';
-               setTimeout(() => {
-                 button.innerText = originalText;
-               }, 2000);
-             })
-             .catch(err => {
-               alert('Failed to copy: ' + err);
-             });
-         }
-         
-         // Share function
-         function shareSummary() {
-           const summaryText = document.getElementById('summaryText').innerText;
-           const url = "${sharedURL}";
-           
-           if (navigator.share) {
-             navigator.share({
-               title: 'AI Summary',
-               text: summaryText,
-               url: url
-             })
-             .catch(err => {
-               console.error('Share failed:', err);
-               copyToClipboard();
-               alert('Sharing failed. Summary copied to clipboard instead!');
-             });
-           } else {
-             copyToClipboard();
-             alert('Web Share not supported. Summary copied to clipboard instead!');
-           }
-         }
-       </script>
-       </head><body>
-       <h2>✅ Summary ready</h2>
-       <pre id="summaryText">${summaryText}</pre>
-       
-       <div class="action-bar">
-         <button onclick="shareSummary()" class="action-button">
-           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-             <circle cx="18" cy="5" r="3"></circle>
-             <circle cx="6" cy="12" r="3"></circle>
-             <circle cx="18" cy="19" r="3"></circle>
-             <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-             <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
-           </svg>
-           Share Summary
-         </button>
-         
-         <button id="copyButton" onclick="copyToClipboard()" class="action-button">
-           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-           </svg>
-           Copy to Clipboard
-         </button>
-         
-         <a href="${sharedURL}" target="_blank" class="action-button">
-           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
-             <polyline points="15 3 21 3 21 9"></polyline>
-             <line x1="10" y1="14" x2="21" y2="3"></line>
-           </svg>
-           Open Original Article
-         </a>
-       </div>
-       
-       <p style="margin-top:2rem">
-         <a href="javascript:history.back()">← Back</a>
-       </p>
-       </body></html>`,
-       { headers:{'Content-Type':'text/html'} });
   } catch (error) {
     // Clean up progress tracking
     cleanupProgressTracking(sharedURL);
@@ -2225,12 +2123,12 @@ async function handleShare(request) {
 }
 
 /**
- * Creates an error response
- * @param {Error} error - Error object
+ * Creates an error response with a user-friendly error page
+ * @param {Error} error - The error that occurred
  * @returns {Response} HTML error response
  */
 function createErrorResponse(error) {
-  // Get detailed error info
+  // Get error information
   const errorInfo = error instanceof SummarizerError 
     ? getDetailedErrorInfo(error)
     : {
@@ -2240,149 +2138,52 @@ function createErrorResponse(error) {
         troubleshooting: getTroubleshooting(ErrorType.UNKNOWN)
       };
   
-  // Special styling based on error severity
-  let severityClass = '';
-  switch (errorInfo.severity) {
-    case ErrorSeverity.TEMPORARY:
-      severityClass = 'temporary-error';
-      break;
-    case ErrorSeverity.FIXABLE:
-      severityClass = 'fixable-error';
-      break;
-    case ErrorSeverity.CRITICAL:
-      severityClass = 'critical-error';
-      break;
-  }
+  // Get the error title and steps
+  const errorTitle = errorInfo.troubleshooting ? errorInfo.troubleshooting.title : 'Error';
+  const errorSteps = errorInfo.troubleshooting && errorInfo.troubleshooting.steps 
+    ? errorInfo.troubleshooting.steps.map(step => `<li>${step}</li>`).join('')
+    : '';
   
-  // Format troubleshooting steps as HTML list
-  const stepsHtml = errorInfo.troubleshooting.steps.map(step => `<li>${step}</li>`).join('');
+  // Generate appropriate CSS class based on severity
+  const severityClass = errorInfo.severity || 'critical';
   
-  // Prepare special actions based on error type
-  let specialActions = '';
-  
-  // Special handling for rate limit errors
-  if (errorInfo.type === ErrorType.RATE_LIMIT) {
-    specialActions = `
-      <div class="action-panel">
-        <h3>Options</h3>
-        <p>While waiting for rate limits to reset, you can:</p>
-        <div class="action-buttons">
-          <button onclick="window.location.href='./index.html?queue=true&url=${encodeURIComponent(error.url || '')}'" class="action-button">Add to Queue</button>
-          <button onclick="window.location.href='./landing.html'" class="action-button secondary">Try Another Provider</button>
-        </div>
-      </div>
-    `;
-  }
-  
-  // Create helpful error page with detailed troubleshooting
+  // Create a simplified HTML error page
   return new Response(`
     <!doctype html><html><head><meta charset="utf-8">
     <title>Error</title><style>
-       body{font-family:sans-serif;padding:2rem;line-height:1.4;max-width:600px;margin:0 auto}
-       
-       .error-container{
-         border-radius:8px;
-         padding:1.5rem;
-         margin-bottom:1.5rem;
-       }
-       
-       .temporary-error{
-         background:#fff7ed;
-         border-left:4px solid #f97316;
-       }
-       
-       .fixable-error{
-         background:#fef2f2;
-         border-left:4px solid #ef4444;
-       }
-       
-       .critical-error{
-         background:#fef2f2;
-         border-left:4px solid #b91c1c;
-       }
-       
-       .error-title{margin-top:0;color:#1e293b;font-size:1.3rem}
-       .error-message{color:#1f2937;font-size:1rem}
-       
-       .troubleshooting-panel{
-         background:#f8fafc;
-         border-radius:8px;
-         padding:1.5rem;
-         margin-bottom:1.5rem;
-       }
-       
-       .troubleshooting-panel h3{margin-top:0;color:#1e293b}
-       .troubleshooting-panel ul{padding-left:1.5rem;color:#4b5563}
-       .troubleshooting-panel li{margin-bottom:0.5rem}
-       
-       .action-panel{
-         background:#eff6ff;
-         border-radius:8px;
-         padding:1.5rem;
-         margin-bottom:1.5rem;
-       }
-       
-       .action-panel h3{margin-top:0;color:#1e40af}
-       .action-panel p{color:#1e40af;margin-bottom:1rem}
-       
-       .action-buttons{
-         display:flex;
-         gap:0.5rem;
-         flex-wrap:wrap;
-       }
-       
-       .action-button{
-         background:#3b82f6;
-         color:white;
-         border:none;
-         padding:0.5rem 1rem;
-         border-radius:4px;
-         cursor:pointer;
-         font-weight:500;
-       }
-       
-       .action-button:hover{background:#2563eb}
-       .action-button.secondary{background:#64748b}
-       .action-button.secondary:hover{background:#475569}
-       
-       .back-link{
-         display:inline-block;
-         margin-top:1rem;
-         color:#4F46E5;
-         text-decoration:none;
-       }
-       
-       .back-link:hover{text-decoration:underline}
-       
-       @media (max-width: 640px) {
-         .action-buttons {
-           flex-direction: column;
-         }
-         
-         .action-button {
-           width: 100%;
-           margin-bottom: 0.5rem;
-         }
-       }
-    </style></head><body>
-    <h2>❌ Error occurred</h2>
-    
-    <div class="error-container ${severityClass}">
-      <h3 class="error-title">${errorInfo.troubleshooting.title}</h3>
-      <p class="error-message">${errorInfo.message}</p>
-    </div>
-    
-    ${specialActions}
-    
-    <div class="troubleshooting-panel">
-      <h3>How to fix this:</h3>
-      <ul>
-        ${stepsHtml}
-      </ul>
-    </div>
-    
-    <a class="back-link" href="javascript:history.back()">← Back</a>
-    <button onclick="window.location.reload()" class="action-button" style="float:right">Try Again</button>
-    </body></html>`,
-    { headers:{'Content-Type':'text/html'} });
+      body{font-family:sans-serif;padding:2rem;line-height:1.4;max-width:600px;margin:0 auto}
+      .error-container{border-radius:8px;padding:1.5rem;margin-bottom:1rem;background:#fef2f2;border-left:4px solid #ef4444}
+      .error-container.temporary{background:#fff7ed;border-left-color:#f97316}
+      .error-container.fixable{background:#fef2f2;border-left-color:#ef4444}
+      .error-container.critical{background:#fef2f2;border-left-color:#b91c1c}
+      .error-title{margin-top:0;color:#1e293b;font-size:1.3rem}
+      .error-message{color:#1f2937}
+      .troubleshooting{background:#f8fafc;border-radius:8px;padding:1rem;margin-bottom:1rem}
+      .troubleshooting h3{margin-top:0;color:#1e293b}
+      .troubleshooting ul{padding-left:1.5rem;color:#4b5563}
+      .troubleshooting li{margin-bottom:0.5rem}
+      .back-link{display:inline-block;margin-top:1rem;color:#4F46E5;text-decoration:none}
+      .back-link:hover{text-decoration:underline}
+      .retry-button{background:#4F46E5;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;cursor:pointer;float:right;margin-top:1rem}
+      .retry-button:hover{background:#4338ca}
+    </style></head>
+    <body>
+      <h2>❌ Error occurred</h2>
+      
+      <div class="error-container ${severityClass}">
+        <h3 class="error-title">${errorTitle}</h3>
+        <p class="error-message">${errorInfo.message}</p>
+      </div>
+      
+      <div class="troubleshooting">
+        <h3>How to fix this:</h3>
+        <ul>${errorSteps}</ul>
+      </div>
+      
+      <a class="back-link" href="javascript:history.back()">← Back</a>
+      <button onclick="window.location.reload()" class="retry-button">Try Again</button>
+    </body>
+    </html>`,
+    { headers:{'Content-Type':'text/html'} }
+  );
 }
