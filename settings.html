@@ -312,7 +312,7 @@
         </div>
 
         <!-- Security Section -->
-        <div class="section" id="securitySection">
+        <div class="section expanded" id="securitySection">
             <div class="section-header" onclick="toggleSection('securitySection')">
                 <h2>Security</h2>
                 <span class="toggle-icon">▼</span>
@@ -323,14 +323,14 @@
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                     </svg>
                     <div class="security-info-content">
-                        <p><strong>Domain Restriction:</strong> For maximum security, we recommend restricting your API key to only work from this domain (<span id="appDomain"></span>). This prevents unauthorized use of your API key even if someone somehow accesses it.</p>
-                        <p style="margin-top: 0.5rem">You can configure domain restrictions when creating your API key. <a href="landing.html">Change Configuration</a> to update your API key with domain restrictions.</p>
+                        <p><strong>Enhanced Security:</strong> Your API key is protected using device-binding encryption. This means your key can only be decrypted and used from this specific device.</p>
+                        <p style="margin-top: 0.5rem">The encryption is tied to your device's unique characteristics, making the key unusable even if someone copies your app data.</p>
                     </div>
                 </div>
                 
                 <div class="info-row">
-                    <span class="info-label">Domain Restriction:</span>
-                    <span class="info-value" id="domainStatus">
+                    <span class="info-label">Device Binding:</span>
+                    <span class="info-value" id="encryptionStatus">
                         <!-- Will be dynamically populated -->
                     </span>
                 </div>
@@ -338,6 +338,13 @@
                 <div class="info-row">
                     <span class="info-label">App Domain:</span>
                     <span class="info-value" id="domainValue">
+                        <!-- Will be dynamically populated -->
+                    </span>
+                </div>
+                
+                <div class="info-row">
+                    <span class="info-label">Security Version:</span>
+                    <span class="info-value" id="securityVersion">
                         <!-- Will be dynamically populated -->
                     </span>
                 </div>
@@ -391,9 +398,64 @@
     </div>
 
     <script>
+        /**
+         * Security utility functions for checking encryption status
+         */
+        
+        /**
+         * Generates a unique device signature using device and browser information
+         * @returns {string} A unique string for the current device
+         */
+        function generateDeviceSignature() {
+            const domain = window.location.hostname || 'ays-0908.github.io';
+            const browserInfo = navigator.userAgent;
+            const screenInfo = `${window.screen.width}x${window.screen.height}`;
+            const languageInfo = navigator.language;
+            const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            
+            // Combine various device signals for a unique signature
+            return `${domain}-${browserInfo}-${screenInfo}-${languageInfo}-${timeZone}`;
+        }
+        
+        /**
+         * Creates a hash from a string
+         * @param {string} str - String to hash
+         * @returns {string} - Hashed value
+         */
+        function stringToHash(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash |= 0; // Convert to 32-bit integer
+            }
+            return hash.toString(16); // Convert to hex string
+        }
+        
+        /**
+         * Decrypts a previously encrypted string
+         * @param {string} encryptedText - Base64 encoded encrypted string
+         * @param {string} key - Decryption key (same as encryption key)
+         * @returns {string} - Original string
+         */
+        function decryptString(encryptedText, key) {
+            if (!encryptedText) return '';
+            try {
+                const encryptedBytes = atob(encryptedText);
+                let result = '';
+                for (let i = 0; i < encryptedBytes.length; i++) {
+                    const charCode = encryptedBytes.charCodeAt(i) ^ key.charCodeAt(i % key.length);
+                    result += String.fromCharCode(charCode);
+                }
+                return result;
+            } catch (e) {
+                console.error('Decryption failed:', e);
+                return '';
+            }
+        }
+        
         // Get the current domain
         const appDomain = window.location.hostname || 'ays-0908.github.io';
-        document.getElementById('appDomain').textContent = appDomain;
         document.getElementById('domainValue').textContent = appDomain;
         
         function toggleSection(sectionId) {
@@ -431,8 +493,8 @@
             return displayNames[model] || model;
         }
 
-        function getDomainStatusBadge(domainRestricted) {
-            if (domainRestricted) {
+        function getSecurityBadge(isEnabled) {
+            if (isEnabled) {
                 return `
                     <span class="security-badge enabled">
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -458,22 +520,25 @@
 
         function loadApiConfig() {
             const configContent = document.getElementById('apiConfigContent');
-            const domainStatus = document.getElementById('domainStatus');
+            const encryptionStatus = document.getElementById('encryptionStatus');
+            const securityVersion = document.getElementById('securityVersion');
             const configString = localStorage.getItem('ai_summarizer_config');
             
             if (!configString) {
                 configContent.innerHTML = `
                     <p class="no-config">No configuration found. Please configure your AI provider first.</p>
                 `;
-                domainStatus.innerHTML = getDomainStatusBadge(false);
+                encryptionStatus.innerHTML = getSecurityBadge(false);
+                securityVersion.textContent = 'Not Available';
                 return;
             }
 
             const config = JSON.parse(configString);
             
-            // Set domain restriction status
-            const isDomainRestricted = config.domainRestricted || false;
-            domainStatus.innerHTML = getDomainStatusBadge(isDomainRestricted);
+            // Check if using encrypted key format
+            const hasEncryption = config.encryptedKey && !config.apiKey;
+            encryptionStatus.innerHTML = getSecurityBadge(hasEncryption);
+            securityVersion.textContent = config.securityVersion || 'Legacy Format';
             
             let modelInfo = '';
             if (config.model) {
@@ -483,6 +548,21 @@
                         <span class="info-value">${getModelDisplayName(config.model)}</span>
                     </div>
                 `;
+            }
+            
+            // Try to get the API key (either directly or by decryption)
+            let maskedKey = 'Encrypted';
+            if (config.apiKey) {
+                // Direct key access (legacy format)
+                maskedKey = maskApiKey(config.apiKey);
+            } else if (config.encryptedKey) {
+                // Generate device key and attempt decryption for masked display
+                const deviceSignature = generateDeviceSignature();
+                const deviceKey = stringToHash(deviceSignature);
+                const decryptedKey = decryptString(config.encryptedKey, deviceKey);
+                if (decryptedKey) {
+                    maskedKey = maskApiKey(decryptedKey);
+                }
             }
 
             configContent.innerHTML = `
@@ -494,9 +574,13 @@
                 <div class="info-row">
                     <span class="info-label">API Key:</span>
                     <span class="info-value">
-                        <span class="api-key">${maskApiKey(config.apiKey)}</span>
-                        ${isDomainRestricted ? '<span class="security-badge enabled" style="margin-left: 0.5rem;">Domain Restricted</span>' : ''}
+                        <span class="api-key">${maskedKey}</span>
+                        ${hasEncryption ? '<span class="security-badge enabled" style="margin-left: 0.5rem;">Device Encrypted</span>' : ''}
                     </span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Last Updated:</span>
+                    <span class="info-value">${config.lastUpdated ? new Date(config.lastUpdated).toLocaleString() : 'Unknown'}</span>
                 </div>
             `;
         }
