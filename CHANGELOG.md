@@ -4,6 +4,22 @@ All notable changes to the GNews-Summarizer project will be documented in this f
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-04-21
+
+### Added
+
+- **Cache Management UI**:
+  - Added detailed view of cached summaries with metadata
+  - Implemented selective deletion of individual cached summaries
+  - Added search/filter functionality for cached items
+  - Created summary preview with detailed view modal
+
+- **Enhanced Offline Support**:
+  - Improved offline detection and user feedback
+  - Added ability to view and manage cached summaries while offline
+  - Implemented graceful error handling during offline use
+  - Added offline indicators in the UI
+
 ## [0.2.0] - 2025-04-21
 
 ### Added
