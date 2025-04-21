@@ -63,22 +63,22 @@
       background: #6b7280;
       color: white;
     }
-    .queue-mode {
+    .action-panel {
       margin: 2rem 0;
       padding: 1rem;
       background: #f8fafc;
       border-radius: 8px;
     }
-    .queue-mode label {
+    .action-panel label {
       display: inline-block;
       margin-bottom: 1rem;
       cursor: pointer;
     }
-    .queue-mode input[type="checkbox"] {
+    .action-panel input[type="checkbox"] {
       margin-right: 0.5rem;
       transform: scale(1.2);
     }
-    #summarizeQueueBtn {
+    .action-button {
       background: #10b981;
       color: white;
       border: none;
@@ -88,13 +88,26 @@
       font-weight: 600;
       cursor: pointer;
       transition: all 0.3s ease;
+      margin: 0.5rem;
     }
-    #summarizeQueueBtn:hover {
+    .action-button:hover {
       background: #059669;
     }
-    #summarizeQueueBtn:disabled {
+    .action-button:disabled {
       background: #9ca3af;
       cursor: not-allowed;
+    }
+    .action-button.danger {
+      background: #dc2626;
+    }
+    .action-button.danger:hover {
+      background: #b91c1c;
+    }
+    .action-button.secondary {
+      background: #6b7280;
+    }
+    .action-button.secondary:hover {
+      background: #4b5563;
     }
     #articleQueue {
       text-align: left;
@@ -182,6 +195,17 @@
       margin: 1rem 0;
       font-family: inherit;
     }
+    /* Cache indicator */
+    .cache-badge {
+      display: inline-block;
+      background: #4F46E5;
+      color: white;
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
     /* Loading indicator styles */
     .spinner {
       width: 40px;
@@ -222,6 +246,39 @@
       margin-top: 0.5rem;
       word-break: break-all;
     }
+    /* Modal for cache management */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: white;
+      padding: 2rem;
+      border-radius: 10px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+    .modal-close {
+      float: right;
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      cursor: pointer;
+      color: #6b7280;
+    }
+    .modal-close:hover {
+      color: #1f2937;
+    }
     @media (max-width: 640px) {
       .nav-links {
         flex-direction: column;
@@ -240,16 +297,23 @@
     <a href="settings.html" class="secondary">Settings</a>
   </div>
 
-  <div class="queue-mode">
+  <div class="action-panel">
     <label>
       <input type="checkbox" id="queueModeToggle"> Queue Mode (for batch processing)
     </label>
     <div id="queueInfo" style="display:none;">
       <p>Queue Mode is ON - Share articles to add them to the queue</p>
-      <button id="summarizeQueueBtn">
+      <button id="summarizeQueueBtn" class="action-button">
         Summarize Queue (<span id="queueCount">0</span>)
       </button>
     </div>
+  </div>
+  
+  <!-- New cache management panel -->
+  <div class="action-panel">
+    <h3>Cache Management</h3>
+    <p>Cached summaries load instantly without using your API credits</p>
+    <button id="clearCacheBtn" class="action-button danger">Clear Cached Summaries</button>
   </div>
 
   <div id="statusMessage" class="status-message"></div>
@@ -271,6 +335,20 @@
 
   <div id="batchResults">
     <!-- Batch summaries will appear here -->
+  </div>
+  
+  <!-- Cache clear confirmation modal -->
+  <div id="cacheModal" class="modal">
+    <div class="modal-content">
+      <button class="modal-close" onclick="document.getElementById('cacheModal').style.display='none'">&times;</button>
+      <h2>Clear Cache?</h2>
+      <p>This will delete all cached summaries. You'll need to regenerate summaries using your API quota.</p>
+      <p>Are you sure you want to continue?</p>
+      <div style="margin-top: 2rem; text-align: center;">
+        <button class="action-button danger" id="confirmClearCache">Yes, Clear Cache</button>
+        <button class="action-button secondary" onclick="document.getElementById('cacheModal').style.display='none'">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <!-- Register service-worker and handle configuration -->
@@ -450,6 +528,25 @@
         showStatus('Service worker not ready. Please refresh the page.', 'error');
       }
     });
+    
+    // Cache management
+    document.getElementById('clearCacheBtn').addEventListener('click', () => {
+      document.getElementById('cacheModal').style.display = 'flex';
+    });
+    
+    document.getElementById('confirmClearCache').addEventListener('click', () => {
+      document.getElementById('cacheModal').style.display = 'none';
+      
+      // Send message to service worker to clear cache
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          action: 'clearCache'
+        });
+        showStatus('Clearing cache...', 'success');
+      } else {
+        showStatus('Service worker not ready. Please refresh the page.', 'error');
+      }
+    });
 
     // Service worker setup
     if ('serviceWorker' in navigator) {
@@ -538,8 +635,12 @@
                   <button class="retry-button" data-url="${result.url}">Try Again</button>
                 `;
               } else {
+                // If it came from cache, show a badge
+                const cacheBadge = result.fromCache ? 
+                  '<span class="cache-badge">From Cache</span>' : '';
+                  
                 summaryDiv.innerHTML = `
-                  <h3>Article ${index + 1}</h3>
+                  <h3>Article ${index + 1} ${cacheBadge}</h3>
                   <a href="${result.url}" target="_blank">${result.url}</a>
                   <pre>${result.summary}</pre>
                 `;
@@ -552,6 +653,12 @@
             queue.articles = [];
             saveQueue(queue);
             updateQueueUI();
+          }
+        } else if (event.data.action === 'cacheClearedResult') {
+          if (event.data.success) {
+            showStatus('Cache cleared successfully!', 'success');
+          } else {
+            showStatus('Failed to clear cache. Please try again.', 'error');
           }
         }
       });
