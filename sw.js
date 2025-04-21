@@ -41,6 +41,89 @@ self.addEventListener('message', async event => {
 });
 
 /**
+ * Security utility functions for API key decryption
+ */
+
+/**
+ * Generates a unique device signature using device and browser information
+ * @returns {string} A unique string for the current device
+ */
+function generateDeviceSignature() {
+  const domain = self.location.hostname || 'ays-0908.github.io';
+  const browserInfo = self.navigator.userAgent;
+  // Services workers don't have access to window.screen, so we adapt
+  const timeZone = 'UTC'; // Default timezone for service worker context
+  
+  // Create a simplified device signature for the service worker
+  return `${domain}-${browserInfo}-${timeZone}`;
+}
+
+/**
+ * Creates a hash from a string
+ * @param {string} str - String to hash
+ * @returns {string} - Hashed value
+ */
+function stringToHash(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0; // Convert to 32-bit integer
+  }
+  return hash.toString(16); // Convert to hex string
+}
+
+/**
+ * Decrypts a previously encrypted string
+ * @param {string} encryptedText - Base64 encoded encrypted string
+ * @param {string} key - Decryption key
+ * @returns {string} - Original string
+ */
+function decryptString(encryptedText, key) {
+  if (!encryptedText) return '';
+  try {
+    const encryptedBytes = atob(encryptedText);
+    let result = '';
+    for (let i = 0; i < encryptedBytes.length; i++) {
+      const charCode = encryptedBytes.charCodeAt(i) ^ key.charCodeAt(i % key.length);
+      result += String.fromCharCode(charCode);
+    }
+    return result;
+  } catch (e) {
+    console.error('Decryption failed:', e);
+    return '';
+  }
+}
+
+/**
+ * Decrypts an API key from an encrypted configuration
+ * @param {Object} config - Configuration object with encryptedKey
+ * @returns {Object} - Configuration with decrypted API key
+ */
+function decryptApiKey(config) {
+  // If config already has a plaintext API key, return as is (legacy support)
+  if (config.apiKey && !config.encryptedKey) {
+    return config;
+  }
+  
+  // If encrypted key is present, decrypt it
+  if (config.encryptedKey) {
+    const deviceSignature = generateDeviceSignature();
+    const deviceKey = stringToHash(deviceSignature);
+    const decryptedKey = decryptString(config.encryptedKey, deviceKey);
+    
+    // Create a new config object with the decrypted key
+    return {
+      ...config,
+      apiKey: decryptedKey
+    };
+  }
+  
+  // Return the config unmodified if no encryption is present
+  return config;
+}
+
+/**
  * Fetches the AI provider configuration from the client
  * @returns {Promise<Object|null>} Configuration object or null if not found/timeout
  */
@@ -60,6 +143,11 @@ async function getConfig() {
       // Timeout after 2 seconds
       setTimeout(() => resolve(null), 2000);
     });
+    
+    // Decrypt API key if configuration was received
+    if (config) {
+      config = decryptApiKey(config);
+    }
   }
   
   return config;
@@ -255,6 +343,11 @@ async function getSummary(url, config) {
   // URL validation
   if (!url || !isValidUrl(url)) {
     throw new SummarizerError('Invalid article URL', ErrorType.INVALID_URL);
+  }
+  
+  // Validate API key
+  if (!config.apiKey || config.apiKey.trim() === '') {
+    throw new SummarizerError('API key is missing or invalid', ErrorType.API_KEY);
   }
   
   let summaryText = '';
