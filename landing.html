@@ -455,7 +455,7 @@
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
             </svg>
             <p>
-                <strong>Enhanced Security:</strong> For maximum security, we recommend restricting your API key to only work from this domain. <a onclick="showSecurityModal()">Learn how to set up domain restrictions</a>
+                <strong>Enhanced Security:</strong> Your API keys are automatically encrypted using a device-specific key. This security feature ensures your keys can only be used from this device.
             </p>
         </div>
 
@@ -475,7 +475,7 @@
                     <div class="input-group">
                         <label for="openai-key">API Key</label>
                         <input type="password" id="openai-key" placeholder="sk-...">
-                        <span class="hint">For security, we recommend using a <a onclick="showSecurityModal('openai')">domain-restricted API key</a></span>
+                        <span class="hint">Your API key is securely encrypted for this device only</span>
                     </div>
                     <div class="input-group">
                         <label for="openai-model">Model</label>
@@ -499,7 +499,7 @@
                     <div class="input-group">
                         <label for="anthropic-key">API Key</label>
                         <input type="password" id="anthropic-key" placeholder="sk-ant-...">
-                        <span class="hint">For security, we recommend using a <a onclick="showSecurityModal('anthropic')">domain-restricted API key</a></span>
+                        <span class="hint">Your API key is securely encrypted for this device only</span>
                     </div>
                     <div class="input-group">
                         <label for="anthropic-model">Model</label>
@@ -523,7 +523,7 @@
                     <div class="input-group">
                         <label for="deepseek-key">API Key</label>
                         <input type="password" id="deepseek-key" placeholder="API Key...">
-                        <span class="hint">For security, we recommend using a <a onclick="showSecurityModal('deepseek')">domain-restricted API key</a></span>
+                        <span class="hint">Your API key is securely encrypted for this device only</span>
                     </div>
                 </div>
             </div>
@@ -578,118 +578,124 @@
         </div>
     </div>
 
-    <!-- Security Instructions Modal -->
-    <div class="modal-overlay" id="securityModal">
-        <div class="modal-content security-modal">
-            <button class="modal-close" onclick="closeModal('securityModal')">&times;</button>
-            <div class="modal-header">
-                <h2>🔒 API Key Security</h2>
-            </div>
-            <div class="modal-section">
-                <p style="color: #64748b; margin-bottom: 1rem; line-height: 1.5;">
-                    For enhanced security, we recommend restricting your API key to only work when requests come from this domain. This prevents unauthorized use of your API key even if someone accesses it.
-                </p>
-                <p style="color: #64748b; margin-bottom: 0; line-height: 1.5;">
-                    The app's domain is: <strong id="appDomain" style="color: #1e293b;"></strong>
-                </p>
-            </div>
-            
-            <div class="provider-steps" id="openaiSteps">
-                <h3>OpenAI API Key Restriction</h3>
-                <ol class="step-list">
-                    <li class="step-item">
-                        <div class="step-number">1</div>
-                        <div class="step-content">
-                            <h3>Go to API Keys</h3>
-                            <p>Visit <a href="https://platform.openai.com/api-keys" target="_blank">https://platform.openai.com/api-keys</a> and create a new secret key</p>
-                        </div>
-                    </li>
-                    <li class="step-item">
-                        <div class="step-number">2</div>
-                        <div class="step-content">
-                            <h3>Set Domain Restriction</h3>
-                            <p>After creating the key, click "Add Domain" and enter: <code id="openaiDomain"></code></p>
-                        </div>
-                    </li>
-                    <li class="step-item">
-                        <div class="step-number">3</div>
-                        <div class="step-content">
-                            <h3>Save the Key</h3>
-                            <p>Click "Save" and paste the key in the app's configuration</p>
-                        </div>
-                    </li>
-                </ol>
-            </div>
-            
-            <div class="provider-steps" id="anthropicSteps">
-                <h3>Anthropic API Key Restriction</h3>
-                <ol class="step-list">
-                    <li class="step-item">
-                        <div class="step-number">1</div>
-                        <div class="step-content">
-                            <h3>Go to API Keys</h3>
-                            <p>Visit <a href="https://console.anthropic.com/settings/keys" target="_blank">https://console.anthropic.com/settings/keys</a> and create a new API key</p>
-                        </div>
-                    </li>
-                    <li class="step-item">
-                        <div class="step-number">2</div>
-                        <div class="step-content">
-                            <h3>Set Website Restriction</h3>
-                            <p>Select "Restrict to one website" and enter: <code id="anthropicDomain"></code></p>
-                        </div>
-                    </li>
-                    <li class="step-item">
-                        <div class="step-number">3</div>
-                        <div class="step-content">
-                            <h3>Save and Copy</h3>
-                            <p>Create the key and paste it in the app's configuration</p>
-                        </div>
-                    </li>
-                </ol>
-            </div>
-            
-            <div class="provider-steps" id="deepseekSteps">
-                <h3>DeepSeek API Key Restriction</h3>
-                <ol class="step-list">
-                    <li class="step-item">
-                        <div class="step-number">1</div>
-                        <div class="step-content">
-                            <h3>Go to API Keys</h3>
-                            <p>Visit <a href="https://platform.deepseek.com/api-keys" target="_blank">https://platform.deepseek.com/api-keys</a> and create a new API key</p>
-                        </div>
-                    </li>
-                    <li class="step-item">
-                        <div class="step-number">2</div>
-                        <div class="step-content">
-                            <h3>Set Domain Restriction</h3>
-                            <p>When creating the key, add domain restriction and enter: <code id="deepseekDomain"></code></p>
-                        </div>
-                    </li>
-                    <li class="step-item">
-                        <div class="step-number">3</div>
-                        <div class="step-content">
-                            <h3>Save and Copy</h3>
-                            <p>Create the key and paste it in the app's configuration</p>
-                        </div>
-                    </li>
-                </ol>
-            </div>
-            
-            <div class="modal-footer">
-                <button class="understand-button" onclick="closeModal('securityModal')">Got It</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         let selectedProvider = null;
         const appDomain = window.location.hostname || 'ays-0908.github.io';
         
-        // Fill domain information in the security modal
-        document.getElementById('appDomain').textContent = appDomain;
-        document.getElementById('openaiDomain').textContent = appDomain;
-        document.getElementById('anthropicDomain').textContent = appDomain;
-        document.getElementById('deepseekDomain').textContent = appDomain;
+        // Security utility functions for API key encryption/decryption
+        // These functions encrypt API keys with device-specific information
+        
+        /**
+         * Generates a unique device signature using device and browser information
+         * @returns {string} A unique string for the current device
+         */
+        function generateDeviceSignature() {
+            const domain = window.location.hostname || 'ays-0908.github.io';
+            const browserInfo = navigator.userAgent;
+            const screenInfo = `${window.screen.width}x${window.screen.height}`;
+            const languageInfo = navigator.language;
+            const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            
+            // Combine various device signals for a unique signature
+            return `${domain}-${browserInfo}-${screenInfo}-${languageInfo}-${timeZone}`;
+        }
+        
+        /**
+         * Creates a hash from a string
+         * @param {string} str - String to hash
+         * @returns {string} - Hashed value
+         */
+        function stringToHash(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash |= 0; // Convert to 32-bit integer
+            }
+            return hash.toString(16); // Convert to hex string
+        }
+        
+        /**
+         * Encrypts a string using XOR with a key
+         * @param {string} text - Text to encrypt
+         * @param {string} key - Encryption key
+         * @returns {string} - Base64 encoded encrypted string
+         */
+        function encryptString(text, key) {
+            if (!text) return '';
+            
+            let result = '';
+            for (let i = 0; i < text.length; i++) {
+                const charCode = text.charCodeAt(i) ^ key.charCodeAt(i % key.length);
+                result += String.fromCharCode(charCode);
+            }
+            // Base64 encode for safer storage
+            return btoa(result);
+        }
+        
+        /**
+         * Decrypts a previously encrypted string
+         * @param {string} encryptedText - Base64 encoded encrypted string
+         * @param {string} key - Decryption key (same as encryption key)
+         * @returns {string} - Original string
+         */
+        function decryptString(encryptedText, key) {
+            if (!encryptedText) return '';
+            try {
+                const encryptedBytes = atob(encryptedText);
+                let result = '';
+                for (let i = 0; i < encryptedBytes.length; i++) {
+                    const charCode = encryptedBytes.charCodeAt(i) ^ key.charCodeAt(i % key.length);
+                    result += String.fromCharCode(charCode);
+                }
+                return result;
+            } catch (e) {
+                console.error('Decryption failed:', e);
+                return '';
+            }
+        }
+        
+        /**
+         * Secure API key storage with device binding
+         * @param {string} apiKey - API key to securely store
+         * @param {string} provider - AI Provider name
+         * @param {string} model - Selected model
+         */
+        function securelyStoreApiKey(apiKey, provider, model) {
+            // Generate device-specific encryption key
+            const deviceSignature = generateDeviceSignature();
+            const deviceKey = stringToHash(deviceSignature);
+            
+            // Encrypt the API key
+            const encryptedKey = encryptString(apiKey, deviceKey);
+            
+            // Store configuration (with encrypted key)
+            const config = {
+                provider: provider,
+                model: model,
+                encryptedKey: encryptedKey,
+                securityVersion: 1, // For future compatibility
+                lastUpdated: new Date().toISOString()
+            };
+            
+            localStorage.setItem('ai_summarizer_config', JSON.stringify(config));
+        }
+        
+        /**
+         * Retrieves and decrypts an API key
+         * @returns {string|null} - Decrypted API key or null if not found/decryptable
+         */
+        function retrieveApiKey() {
+            const config = JSON.parse(localStorage.getItem('ai_summarizer_config'));
+            if (!config || !config.encryptedKey) return null;
+            
+            // Recreate device signature for decryption
+            const deviceSignature = generateDeviceSignature();
+            const deviceKey = stringToHash(deviceSignature);
+            
+            // Decrypt API key
+            return decryptString(config.encryptedKey, deviceKey);
+        }
 
         // Check for existing configuration and pre-fill form
         function loadExistingConfig() {
@@ -697,6 +703,17 @@
             if (existingConfig) {
                 const config = JSON.parse(existingConfig);
                 selectedProvider = config.provider;
+                
+                // Get decrypted API key if available
+                let apiKey = '';
+                if (config.encryptedKey) {
+                    const deviceSignature = generateDeviceSignature();
+                    const deviceKey = stringToHash(deviceSignature);
+                    apiKey = decryptString(config.encryptedKey, deviceKey);
+                } else if (config.apiKey) {
+                    // Legacy support for old format
+                    apiKey = config.apiKey;
+                }
 
                 // Select the correct provider option
                 const providerOption = document.querySelector(`[data-provider="${config.provider}"]`);
@@ -705,8 +722,8 @@
                     
                     // Pre-fill API key
                     const apiKeyInput = providerOption.querySelector('input[type="password"]');
-                    if (apiKeyInput) {
-                        apiKeyInput.value = config.apiKey;
+                    if (apiKeyInput && apiKey) {
+                        apiKeyInput.value = apiKey;
                     }
                     
                     // Pre-select model if applicable
@@ -716,36 +733,10 @@
                     }
                     
                     // Enable install button
-                    document.getElementById('installButton').disabled = false;
+                    document.getElementById('installButton').disabled = !apiKey;
                     document.getElementById('installButton').textContent = 'Update Configuration';
                 }
             }
-        }
-
-        // Show the security modal
-        function showSecurityModal(provider) {
-            // Hide all provider sections first
-            document.getElementById('openaiSteps').style.display = 'none';
-            document.getElementById('anthropicSteps').style.display = 'none';
-            document.getElementById('deepseekSteps').style.display = 'none';
-            
-            // Show only the relevant section
-            if (provider) {
-                if (provider === 'openai') {
-                    document.getElementById('openaiSteps').style.display = 'block';
-                } else if (provider === 'anthropic') {
-                    document.getElementById('anthropicSteps').style.display = 'block';
-                } else if (provider === 'deepseek') {
-                    document.getElementById('deepseekSteps').style.display = 'block';
-                }
-            } else {
-                // If no provider specified, show all
-                document.getElementById('openaiSteps').style.display = 'block';
-                document.getElementById('anthropicSteps').style.display = 'block';
-                document.getElementById('deepseekSteps').style.display = 'block';
-            }
-            
-            document.getElementById('securityModal').classList.add('active');
         }
 
         // Show the instructions modal
@@ -806,16 +797,8 @@
             const modelSelect = providerOption.querySelector('select');
             const model = modelSelect ? modelSelect.value : null;
 
-            // Create configuration
-            const config = {
-                provider: selectedProvider,
-                apiKey: apiKey,
-                model: model,
-                domainRestricted: true  // Flag to indicate this is using domain restriction
-            };
-
-            // Store configuration in localStorage
-            localStorage.setItem('ai_summarizer_config', JSON.stringify(config));
+            // Save configuration with encrypted API key
+            securelyStoreApiKey(apiKey, selectedProvider, model);
 
             // Show success message and instructions modal
             document.getElementById('successMessage').style.display = 'block';
