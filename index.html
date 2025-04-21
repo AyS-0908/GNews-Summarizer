@@ -1,62 +1,1331 @@
-console.log("Error converting to encrypted format:", err);
-            // Continue with plaintext version for now
-          }
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#4F46E5">
+    <title>AI News Summarizer</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="icon.png" type="image/png">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-      }
 
-      // Initialize UI
-      const queue = getQueue();
-      document.getElementById('queueModeToggle').checked = queue.queueMode;
-      updateQueueUI();
-      
-      // Add event delegation for retry buttons
-      document.getElementById('batchResults').addEventListener('click', event => {
-        if (event.target.classList.contains('retry-button')) {
-          const url = event.target.getAttribute('data-url');
-          if (url) {
-            // Add back to queue
-            const queue = getQueue();
-            queue.articles.push({
-              url: url,
-              timestamp: new Date().toISOString()
-            });
-            saveQueue(queue);
-            updateQueueUI();
-            showStatus('Article added back to queue for retry', 'success');
-            
-            // Remove the error item
-            const errorItem = event.target.closest('.error-item');
-            if (errorItem) {
-              errorItem.remove();
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            color: #1a1a1a;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 90%;
+            margin: 2rem auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            padding: 1.5rem;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            color: #111827;
+        }
+
+        .service-worker-status {
+            display: flex;
+            align-items: center;
+            font-size: 0.8rem;
+            background: #f3f4f6;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        .status-indicator.active {
+            background: #10b981;
+        }
+
+        .status-indicator.loading {
+            background: #f59e0b;
+            animation: pulse 1.5s infinite;
+        }
+
+        .status-indicator.error {
+            background: #ef4444;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
+        }
+
+        .queue-controls {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+        }
+
+        .toggle {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            margin-right: 0.5rem;
+        }
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            border-radius: 34px;
+            transition: .4s;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            border-radius: 50%;
+            transition: .4s;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: #4F46E5;
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(20px);
+        }
+
+        .toggle-label {
+            color: #4b5563;
+            font-size: 0.9rem;
+        }
+
+        button {
+            background: #4F46E5;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #4338ca;
+        }
+
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: #f3f4f6;
+            color: #4b5563;
+        }
+
+        button.secondary:hover {
+            background: #e5e7eb;
+        }
+
+        button.danger {
+            background: #ef4444;
+        }
+
+        button.danger:hover {
+            background: #dc2626;
+        }
+
+        .queue-section {
+            margin-bottom: 2rem;
+        }
+
+        .queue-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .queue-header h2 {
+            font-size: 1.2rem;
+            color: #111827;
+        }
+
+        .queue-count {
+            background: #e5e7eb;
+            color: #4b5563;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .queue-empty {
+            text-align: center;
+            color: #6b7280;
+            padding: 2rem;
+            background: #f9fafb;
+            border-radius: 8px;
+            border: 1px dashed #d1d5db;
+        }
+
+        .queue-list {
+            list-style: none;
+            margin-bottom: 1rem;
+        }
+
+        .queue-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .queue-item:last-child {
+            border-bottom: none;
+        }
+
+        .queue-item-url {
+            flex: 1;
+            margin-right: 1rem;
+            word-break: break-all;
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .queue-item-remove {
+            background: transparent;
+            color: #9ca3af;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s;
+            padding: 0;
+        }
+
+        .queue-item-remove:hover {
+            background: #f3f4f6;
+            color: #ef4444;
+        }
+
+        .results-section {
+            margin-top: 2rem;
+        }
+
+        .results-header {
+            font-size: 1.2rem;
+            color: #111827;
+            margin-bottom: 1rem;
+        }
+
+        .batch-progress {
+            display: none;
+            margin-bottom: 1.5rem;
+        }
+
+        .progress-container {
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 0.5rem;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: #4F46E5;
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .progress-text {
+            display: flex;
+            justify-content: space-between;
+            color: #6b7280;
+            font-size: 0.8rem;
+        }
+
+        .batch-results {
+            margin-top: 1rem;
+        }
+
+        .result-item {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.75rem;
+        }
+
+        .result-title {
+            font-weight: 600;
+            color: #111827;
+        }
+
+        .result-badge {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            color: white;
+        }
+
+        .result-badge.cached {
+            background: #10b981;
+        }
+
+        .result-content {
+            white-space: pre-wrap;
+            color: #374151;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .error-item {
+            background: #fef2f2;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .error-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.75rem;
+        }
+
+        .error-title {
+            font-weight: 600;
+            color: #991b1b;
+        }
+
+        .error-badge {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            color: white;
+        }
+
+        .error-badge.temporary {
+            background: #f59e0b;
+        }
+
+        .error-badge.fixable {
+            background: #2563eb;
+        }
+
+        .error-badge.critical {
+            background: #dc2626;
+        }
+
+        .error-content {
+            color: #4b5563;
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .retry-button {
+            font-size: 0.8rem;
+            padding: 0.3rem 0.6rem;
+        }
+
+        .retry-via-api {
+            font-size: 0.8rem;
+            background: #4b5563;
+        }
+
+        .retry-via-api:hover {
+            background: #374151;
+        }
+
+        .status-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #1f2937;
+            color: white;
+            padding: 0.75rem;
+            text-align: center;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+
+        .status-bar.active {
+            transform: translateY(0);
+        }
+
+        .status-bar.success {
+            background: #065f46;
+        }
+
+        .status-bar.error {
+            background: #991b1b;
+        }
+
+        .status-bar.info {
+            background: #1e40af;
+        }
+
+        .nav-links {
+            margin-top: 2rem;
+            text-align: center;
+        }
+
+        .nav-link {
+            color: #4F46E5;
+            text-decoration: none;
+            margin: 0 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #d1d5db;
+            border-radius: 50%;
+            border-top-color: #4F46E5;
+            animation: spin 1s linear infinite;
+            margin-right: 0.5rem;
+        }
+
+        /* Adaptive timeout indicator */
+        .timeout-indicator {
+            margin-left: 0.5rem;
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+
+        .fast-connection .timeout-indicator::before {
+            content: "●";
+            color: #10b981;
+            margin-right: 0.25rem;
+        }
+
+        .medium-connection .timeout-indicator::before {
+            content: "●";
+            color: #f59e0b;
+            margin-right: 0.25rem;
+        }
+
+        .slow-connection .timeout-indicator::before {
+            content: "●";
+            color: #ef4444;
+            margin-right: 0.25rem;
+        }
+
+        @media (max-width: 640px) {
+            .container {
+                width: 95%;
+                padding: 1rem;
             }
-          }
+
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .service-worker-status {
+                margin-top: 0.5rem;
+            }
+
+            .queue-controls {
+                flex-direction: column;
+                gap: 0.75rem;
+            }
         }
-      });
-      
-      // Check service worker status periodically
-      setInterval(async () => {
-        if (swReady) {
-          try {
-            await pingServiceWorker();
-            // If ping successful, service worker is responsive
-          } catch (error) {
-            console.error('Service worker ping failed:', error);
-            swReady = false;
-            updateServiceWorkerStatus('error', 'Service Worker unresponsive');
-          }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>AI News Summarizer</h1>
+            <div class="service-worker-status">
+                <div class="status-indicator loading" id="swStatus"></div>
+                <span id="swStatusText">Checking Service Worker...</span>
+                <span class="timeout-indicator" id="connectionQuality"></span>
+            </div>
+        </div>
+
+        <div class="queue-controls">
+            <div class="toggle-container">
+                <label class="toggle">
+                    <input type="checkbox" id="queueModeToggle">
+                    <span class="toggle-slider"></span>
+                </label>
+                <span class="toggle-label">Queue Mode</span>
+            </div>
+            <button id="processQueueBtn" disabled>Process Queue (0)</button>
+            <button id="clearQueueBtn" class="secondary" disabled>Clear Queue</button>
+            <button id="clearCacheBtn" class="secondary">Clear Cache</button>
+        </div>
+
+        <div class="queue-section">
+            <div class="queue-header">
+                <h2>Article Queue</h2>
+                <span class="queue-count" id="queueCount">0 articles</span>
+            </div>
+            <div class="queue-empty" id="queueEmpty">
+                No articles in queue. Share articles from Google News to add them here.
+            </div>
+            <ul class="queue-list" id="queueList" style="display: none;">
+                <!-- Queue items will be added here -->
+            </ul>
+        </div>
+
+        <div class="results-section">
+            <h2 class="results-header">Processing Results</h2>
+            
+            <div class="batch-progress" id="batchProgress">
+                <div class="progress-container">
+                    <div class="progress-bar" id="progressBar"></div>
+                </div>
+                <div class="progress-text">
+                    <span id="progressText">Processing 0 of 0</span>
+                    <span id="progressPercent">0%</span>
+                </div>
+            </div>
+            
+            <div class="batch-results" id="batchResults">
+                <!-- Results will be added here -->
+            </div>
+        </div>
+
+        <div class="nav-links">
+            <a href="landing.html" class="nav-link">Change AI Provider</a>
+            <a href="settings.html" class="nav-link">Settings</a>
+        </div>
+    </div>
+
+    <div class="status-bar" id="statusBar"></div>
+
+    <script>
+        // Variables
+        let swReady = false;
+        let connectionQuality = 'medium';
+        let lastPingTime = 0;
+
+        /**
+         * Get the queue from localStorage
+         * @returns {Object} Queue object
+         */
+        function getQueue() {
+            const queueString = localStorage.getItem('summarizer_queue');
+            if (queueString) {
+                try {
+                    return JSON.parse(queueString);
+                } catch (e) {
+                    console.error('Error parsing queue:', e);
+                }
+            }
+            
+            // Default empty queue
+            return {
+                queueMode: false,
+                articles: []
+            };
+        }
+
+        /**
+         * Save the queue to localStorage
+         * @param {Object} queue - Queue object to save
+         */
+        function saveQueue(queue) {
+            localStorage.setItem('summarizer_queue', JSON.stringify(queue));
+        }
+
+        /**
+         * Update the queue UI based on current queue state
+         */
+        function updateQueueUI() {
+            const queue = getQueue();
+            const count = queue.articles.length;
+            
+            // Update count display
+            document.getElementById('queueCount').textContent = `${count} article${count !== 1 ? 's' : ''}`;
+            
+            // Update process queue button
+            const processBtn = document.getElementById('processQueueBtn');
+            processBtn.textContent = `Process Queue (${count})`;
+            processBtn.disabled = count === 0;
+            
+            // Update clear queue button
+            document.getElementById('clearQueueBtn').disabled = count === 0;
+            
+            // Show/hide empty state and list
+            const emptyEl = document.getElementById('queueEmpty');
+            const listEl = document.getElementById('queueList');
+            
+            if (count === 0) {
+                emptyEl.style.display = 'block';
+                listEl.style.display = 'none';
+                listEl.innerHTML = '';
+            } else {
+                emptyEl.style.display = 'none';
+                listEl.style.display = 'block';
+                
+                // Build queue list
+                let listHtml = '';
+                
+                queue.articles.forEach((article, index) => {
+                    const url = article.url;
+                    const displayUrl = url.length > 50 ? url.substring(0, 47) + '...' : url;
+                    
+                    listHtml += `
+                        <li class="queue-item" data-index="${index}">
+                            <div class="queue-item-url" title="${url}">${displayUrl}</div>
+                            <button class="queue-item-remove" aria-label="Remove from queue">×</button>
+                        </li>
+                    `;
+                });
+                
+                listEl.innerHTML = listHtml;
+                
+                // Add event listeners to remove buttons
+                document.querySelectorAll('.queue-item-remove').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const item = e.target.closest('.queue-item');
+                        const index = parseInt(item.getAttribute('data-index'));
+                        
+                        // Remove from queue
+                        const queue = getQueue();
+                        queue.articles.splice(index, 1);
+                        saveQueue(queue);
+                        
+                        // Update UI
+                        updateQueueUI();
+                        showStatus('Article removed from queue', 'info');
+                    });
+                });
+            }
+        }
+
+        /**
+         * Shows status message in the status bar
+         * @param {string} message - Status message
+         * @param {string} type - Status type (success, error, info)
+         * @param {number} duration - Duration in ms (default: 3000)
+         */
+        function showStatus(message, type = 'info', duration = 3000) {
+            const statusBar = document.getElementById('statusBar');
+            statusBar.textContent = message;
+            statusBar.className = `status-bar active ${type}`;
+            
+            // Clear any existing timeout
+            if (statusBar._timeout) {
+                clearTimeout(statusBar._timeout);
+            }
+            
+            // Hide after duration
+            statusBar._timeout = setTimeout(() => {
+                statusBar.classList.remove('active');
+            }, duration);
+        }
+
+        /**
+         * Updates the service worker status display
+         * @param {string} status - Status (active, loading, error)
+         * @param {string} message - Status message
+         */
+        function updateServiceWorkerStatus(status, message) {
+            const indicator = document.getElementById('swStatus');
+            const text = document.getElementById('swStatusText');
+            
+            indicator.className = `status-indicator ${status}`;
+            text.textContent = message;
+            
+            // Update connection quality display
+            updateConnectionQuality();
+        }
+
+        /**
+         * Updates the connection quality indicator
+         */
+        function updateConnectionQuality() {
+            const indicator = document.getElementById('connectionQuality');
+            
+            if (!swReady) {
+                indicator.textContent = '';
+                return;
+            }
+            
+            switch (connectionQuality) {
+                case 'fast':
+                    indicator.textContent = 'Fast connection';
+                    indicator.parentElement.className = 'service-worker-status fast-connection';
+                    break;
+                case 'medium':
+                    indicator.textContent = 'Normal connection';
+                    indicator.parentElement.className = 'service-worker-status medium-connection';
+                    break;
+                case 'slow':
+                    indicator.textContent = 'Slow connection';
+                    indicator.parentElement.className = 'service-worker-status slow-connection';
+                    break;
+            }
+        }
+
+        /**
+         * Ping service worker to check if it's responsive
+         * @returns {Promise} Promise that resolves if ping is successful
+         */
+        async function pingServiceWorker() {
+            return new Promise((resolve, reject) => {
+                const startTime = performance.now();
+                lastPingTime = startTime;
+                
+                const channel = new MessageChannel();
+                
+                // Set up timeout
+                const timeoutDuration = 5000; // 5 seconds max
+                const timeout = setTimeout(() => {
+                    reject(new Error('Service worker ping timed out'));
+                }, timeoutDuration);
+                
+                // Listen for the response
+                channel.port1.onmessage = (event) => {
+                    clearTimeout(timeout);
+                    
+                    if (event.data.action === 'pong') {
+                        // Calculate ping time and update connection quality
+                        const pingTime = performance.now() - startTime;
+                        
+                        if (pingTime < 100) {
+                            connectionQuality = 'fast';
+                        } else if (pingTime < 500) {
+                            connectionQuality = 'medium';
+                        } else {
+                            connectionQuality = 'slow';
+                        }
+                        
+                        updateConnectionQuality();
+                        resolve(pingTime);
+                    } else {
+                        reject(new Error('Invalid response from service worker'));
+                    }
+                };
+                
+                // Send the ping
+                if (navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage(
+                        { action: 'ping' },
+                        [channel.port2]
+                    );
+                } else {
+                    reject(new Error('No active service worker'));
+                }
+            });
+        }
+
+        /**
+         * Check service worker status and update UI
+         */
+        async function checkServiceWorkerStatus() {
+            if (!('serviceWorker' in navigator)) {
+                return;
+            }
+            
+            try {
+                const registration = await navigator.serviceWorker.getRegistration();
+                
+                if (!registration) {
+                    swReady = false;
+                    updateServiceWorkerStatus('error', 'Service Worker not registered');
+                    return;
+                }
+                
+                if (registration.installing) {
+                    swReady = false;
+                    updateServiceWorkerStatus('loading', 'Service Worker installing...');
+                } else if (registration.waiting) {
+                    swReady = false;
+                    updateServiceWorkerStatus('loading', 'Service Worker waiting...');
+                } else if (registration.active) {
+                    // Active service worker found, now check if it's responsive
+                    try {
+                        await pingServiceWorker();
+                        swReady = true;
+                        updateServiceWorkerStatus('active', 'Service Worker active');
+                    } catch (error) {
+                        console.error('Service worker ping failed:', error);
+                        swReady = false;
+                        updateServiceWorkerStatus('error', 'Service Worker unresponsive');
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking service worker status:', error);
+                swReady = false;
+                updateServiceWorkerStatus('error', 'Service Worker error');
+            }
+        }
+
+        /**
+         * Process the current article queue
+         */
+        async function processQueue() {
+            const queue = getQueue();
+            
+            if (queue.articles.length === 0) {
+                showStatus('Queue is empty', 'info');
+                return;
+            }
+            
+            if (!swReady) {
+                showStatus('Service Worker not ready', 'error');
+                return;
+            }
+            
+            // Show the batch progress UI
+            const batchProgress = document.getElementById('batchProgress');
+            batchProgress.style.display = 'block';
+            
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const progressPercent = document.getElementById('progressPercent');
+            
+            // Reset progress
+            progressBar.style.width = '0%';
+            progressText.textContent = `Processing 0 of ${queue.articles.length}`;
+            progressPercent.textContent = '0%';
+            
+            // Disable buttons during processing
+            document.getElementById('processQueueBtn').disabled = true;
+            document.getElementById('clearQueueBtn').disabled = true;
+            
+            try {
+                // Send articles to service worker for processing
+                await navigator.serviceWorker.controller.postMessage({
+                    action: 'summarizeQueue',
+                    articles: queue.articles
+                });
+                
+                showStatus('Queue processing started', 'info');
+            } catch (error) {
+                console.error('Error starting queue processing:', error);
+                showStatus('Failed to start processing', 'error');
+                
+                // Re-enable buttons
+                updateQueueUI();
+            }
+        }
+
+        /**
+         * Clear the article queue
+         */
+        function clearQueue() {
+            const queue = getQueue();
+            
+            if (queue.articles.length === 0) {
+                return;
+            }
+            
+            // Clear articles but keep queue mode setting
+            queue.articles = [];
+            saveQueue(queue);
+            
+            // Update UI
+            updateQueueUI();
+            showStatus('Queue cleared', 'success');
+        }
+
+        /**
+         * Clear the summary cache
+         */
+        async function clearCache() {
+            if (!swReady) {
+                showStatus('Service Worker not ready', 'error');
+                return;
+            }
+            
+            // Disable button during clearing
+            const clearCacheBtn = document.getElementById('clearCacheBtn');
+            const originalText = clearCacheBtn.textContent;
+            clearCacheBtn.disabled = true;
+            clearCacheBtn.innerHTML = '<span class="spinner"></span>Clearing...';
+            
+            try {
+                // Ask service worker to clear cache
+                await navigator.serviceWorker.controller.postMessage({
+                    action: 'clearCache'
+                });
+                
+                showStatus('Cache cleared successfully', 'success');
+            } catch (error) {
+                console.error('Error clearing cache:', error);
+                showStatus('Failed to clear cache', 'error');
+            } finally {
+                // Re-enable button
+                clearCacheBtn.disabled = false;
+                clearCacheBtn.textContent = originalText;
+            }
+        }
+
+        /**
+         * Handle retry request via direct API call
+         * @param {string} url - URL to retry
+         * @param {Element} button - Button element that was clicked
+         */
+        async function handleDirectRetry(url, button) {
+            if (!swReady) {
+                showStatus('Service Worker not ready', 'error');
+                return;
+            }
+            
+            // Update button state
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner"></span>Retrying...';
+            
+            try {
+                // Send retry request to service worker
+                await navigator.serviceWorker.controller.postMessage({
+                    action: 'retryFailedSummary',
+                    url: url
+                });
+                
+                // Show pending status, will be updated when response comes back
+                showStatus('Retry request sent', 'info');
+            } catch (error) {
+                console.error('Error sending retry request:', error);
+                showStatus('Failed to send retry request', 'error');
+                
+                // Restore button
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+
+        /**
+         * Handle service worker messages
+         * @param {MessageEvent} event - Message event
+         */
+        function handleServiceWorkerMessage(event) {
+            const data = event.data;
+            
+            switch (data.action) {
+                case 'getConfig':
+                    // Service worker is asking for config
+                    const configString = localStorage.getItem('ai_summarizer_config');
+                    let config = null;
+                    
+                    if (configString) {
+                        try {
+                            config = JSON.parse(configString);
+                        } catch (e) {
+                            console.error('Error parsing config:', e);
+                        }
+                    }
+                    
+                    event.source.postMessage({
+                        action: 'config',
+                        config: config
+                    });
+                    break;
+                
+                case 'getQueueMode':
+                    // Service worker is asking for queue mode
+                    const queue = getQueue();
+                    
+                    event.source.postMessage({
+                        action: 'queueMode',
+                        queueMode: queue.queueMode
+                    });
+                    break;
+                
+                case 'addToQueue':
+                    // Service worker wants to add an article to queue
+                    const url = data.url;
+                    const timestamp = data.timestamp;
+                    
+                    if (url) {
+                        const queue = getQueue();
+                        
+                        // Check if URL already exists in queue
+                        const exists = queue.articles.some(article => article.url === url);
+                        
+                        if (!exists) {
+                            queue.articles.push({
+                                url: url,
+                                timestamp: timestamp || new Date().toISOString()
+                            });
+                            
+                            saveQueue(queue);
+                            updateQueueUI();
+                            showStatus('Article added to queue', 'success');
+                        }
+                    }
+                    break;
+                
+                case 'batchProcessingStarted':
+                    // Batch processing has started
+                    const totalArticles = data.totalArticles;
+                    
+                    // Clear previous results
+                    document.getElementById('batchResults').innerHTML = '';
+                    
+                    // Update progress display
+                    document.getElementById('progressBar').style.width = '0%';
+                    document.getElementById('progressText').textContent = `Processing 0 of ${totalArticles}`;
+                    document.getElementById('progressPercent').textContent = '0%';
+                    break;
+                
+                case 'batchProgress':
+                    // Update batch progress
+                    const current = data.current;
+                    const total = data.total;
+                    const percent = Math.round((current / total) * 100);
+                    
+                    document.getElementById('progressBar').style.width = `${percent}%`;
+                    document.getElementById('progressText').textContent = `Processing ${current} of ${total}`;
+                    document.getElementById('progressPercent').textContent = `${percent}%`;
+                    break;
+                
+                case 'batchSummaryComplete':
+                    // Batch processing complete
+                    const results = data.results;
+                    
+                    // Enable buttons
+                    document.getElementById('processQueueBtn').disabled = false;
+                    document.getElementById('clearQueueBtn').disabled = false;
+                    
+                    // Clear queue after successful processing
+                    const queue = getQueue();
+                    queue.articles = [];
+                    saveQueue(queue);
+                    updateQueueUI();
+                    
+                    // Show results
+                    showBatchResults(results);
+                    showStatus('Queue processing complete', 'success');
+                    break;
+                
+                case 'rateLimitReached':
+                    // Rate limit reached during batch processing
+                    const remainingArticles = data.remainingArticles;
+                    
+                    // Put remaining articles back in queue
+                    if (remainingArticles && remainingArticles.length > 0) {
+                        const queue = getQueue();
+                        queue.articles = remainingArticles;
+                        saveQueue(queue);
+                        updateQueueUI();
+                        
+                        showStatus(`Rate limit reached - ${remainingArticles.length} articles returned to queue`, 'error', 5000);
+                    }
+                    break;
+                
+                case 'cacheClearedResult':
+                    // Cache clearing result
+                    const success = data.success;
+                    const clearCacheBtn = document.getElementById('clearCacheBtn');
+                    
+                    clearCacheBtn.disabled = false;
+                    clearCacheBtn.textContent = 'Clear Cache';
+                    
+                    if (success) {
+                        showStatus('Cache cleared successfully', 'success');
+                    } else {
+                        showStatus('Failed to clear cache', 'error');
+                    }
+                    break;
+                
+                case 'retrySuccess':
+                    // Successful retry response
+                    const successUrl = data.url;
+                    const summary = data.summary;
+                    
+                    // Find and update result item
+                    const errorItems = document.querySelectorAll('.error-item');
+                    for (let i = 0; i < errorItems.length; i++) {
+                        const item = errorItems[i];
+                        const itemUrl = item.getAttribute('data-url');
+                        
+                        if (itemUrl === successUrl) {
+                            // Replace with success result
+                            const resultItem = document.createElement('div');
+                            resultItem.className = 'result-item';
+                            resultItem.innerHTML = `
+                                <div class="result-header">
+                                    <div class="result-title">${getDisplayUrl(successUrl)}</div>
+                                </div>
+                                <div class="result-content">${summary}</div>
+                            `;
+                            
+                            item.parentNode.replaceChild(resultItem, item);
+                            showStatus('Retry successful', 'success');
+                            break;
+                        }
+                    }
+                    break;
+                
+                case 'retryFailure':
+                    // Failed retry response
+                    const failureUrl = data.url;
+                    const error = data.error;
+                    
+                    // Find and update buttons
+                    const retryButtons = document.querySelectorAll('.retry-via-api');
+                    for (let i = 0; i < retryButtons.length; i++) {
+                        const button = retryButtons[i];
+                        const buttonUrl = button.getAttribute('data-url');
+                        
+                        if (buttonUrl === failureUrl) {
+                            button.disabled = false;
+                            button.textContent = 'Retry Direct';
+                            
+                            // Update error message
+                            const errorItem = button.closest('.error-item');
+                            const errorContent = errorItem.querySelector('.error-content');
+                            errorContent.textContent = error.message;
+                            
+                            showStatus('Retry failed: ' + error.message, 'error');
+                            break;
+                        }
+                    }
+                    break;
+                
+                case 'summaryProgress':
+                    // Progress update for an ongoing summarization
+                    // This is handled by the share page, not in this index.html
+                    break;
+            }
+        }
+
+        /**
+         * Format a URL for display
+         * @param {string} url - URL to format
+         * @returns {string} Formatted URL
+         */
+        function getDisplayUrl(url) {
+            try {
+                const urlObj = new URL(url);
+                return urlObj.hostname + urlObj.pathname.substring(0, 20) + (urlObj.pathname.length > 20 ? '...' : '');
+            } catch (e) {
+                return url.substring(0, 40) + (url.length > 40 ? '...' : '');
+            }
+        }
+
+        /**
+         * Show batch processing results
+         * @param {Array} results - Array of result objects
+         */
+        function showBatchResults(results) {
+            const resultsContainer = document.getElementById('batchResults');
+            let html = '';
+            
+            if (results.length === 0) {
+                html = '<div class="queue-empty">No results to display</div>';
+            } else {
+                results.forEach(result => {
+                    if (result.success) {
+                        html += `
+                            <div class="result-item">
+                                <div class="result-header">
+                                    <div class="result-title">${getDisplayUrl(result.url)}</div>
+                                    ${result.fromCache ? '<span class="result-badge cached">From Cache</span>' : ''}
+                                </div>
+                                <div class="result-content">${result.summary}</div>
+                            </div>
+                        `;
+                    } else {
+                        // Error result
+                        let severityClass = '';
+                        let severityText = '';
+                        
+                        switch (result.severity) {
+                            case 'temporary':
+                                severityClass = 'temporary';
+                                severityText = 'Temporary Issue';
+                                break;
+                            case 'fixable':
+                                severityClass = 'fixable';
+                                severityText = 'Fixable Issue';
+                                break;
+                            case 'critical':
+                                severityClass = 'critical';
+                                severityText = 'Critical Issue';
+                                break;
+                        }
+                        
+                        html += `
+                            <div class="error-item" data-url="${result.url}">
+                                <div class="error-header">
+                                    <div class="error-title">${getDisplayUrl(result.url)}</div>
+                                    <span class="error-badge ${severityClass}">${severityText}</span>
+                                </div>
+                                <div class="error-content">${result.summary}</div>
+                                <div class="error-actions">
+                                    <button class="retry-button" data-url="${result.url}">Add Back to Queue</button>
+                                    ${result.severity === 'temporary' ? 
+                                        `<button class="retry-via-api" data-url="${result.url}">Retry Direct</button>` : 
+                                        ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+            }
+            
+            resultsContainer.innerHTML = html;
+            
+            // Add event listeners for direct retry buttons
+            document.querySelectorAll('.retry-via-api').forEach(button => {
+                button.addEventListener('click', () => {
+                    const url = button.getAttribute('data-url');
+                    handleDirectRetry(url, button);
+                });
+            });
+        }
+
+        // Initialize when page loads
+        window.addEventListener('load', () => {
+            // Initialize queue UI
+            updateQueueUI();
+            
+            // Queue mode toggle
+            document.getElementById('queueModeToggle').addEventListener('change', (e) => {
+                const queue = getQueue();
+                queue.queueMode = e.target.checked;
+                saveQueue(queue);
+                
+                showStatus(`Queue mode ${queue.queueMode ? 'enabled' : 'disabled'}`, 'info');
+            });
+            
+            // Process queue button
+            document.getElementById('processQueueBtn').addEventListener('click', processQueue);
+            
+            // Clear queue button
+            document.getElementById('clearQueueBtn').addEventListener('click', clearQueue);
+            
+            // Clear cache button
+            document.getElementById('clearCacheBtn').addEventListener('click', clearCache);
+            
+            // Listen for service worker messages
+            navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+        });
+
+        // Register service worker and check status
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(registration => {
+                    console.log('Service Worker registered with scope:', registration.scope);
+                    
+                    // Check service worker status
+                    checkServiceWorkerStatus();
+                    
+                    // Listen for service worker state changes
+                    if (registration.installing) {
+                        registration.installing.addEventListener('statechange', () => {
+                            checkServiceWorkerStatus();
+                        });
+                    }
+                    
+                    if (registration.waiting) {
+                        registration.waiting.addEventListener('statechange', () => {
+                            checkServiceWorkerStatus();
+                        });
+                    }
+                    
+                    if (registration.active) {
+                        registration.active.addEventListener('statechange', () => {
+                            checkServiceWorkerStatus();
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Service Worker registration failed:', error);
+                    updateServiceWorkerStatus('error', 'Registration failed');
+                    showStatus('Service Worker registration failed', 'error');
+                });
+            
+            // Check service worker status periodically
+            setInterval(async () => {
+                if (swReady) {
+                    try {
+                        await pingServiceWorker();
+                        // If ping successful, service worker is responsive
+                    } catch (error) {
+                        console.error('Service worker ping failed:', error);
+                        swReady = false;
+                        updateServiceWorkerStatus('error', 'Service Worker unresponsive');
+                    }
+                } else {
+                    // Try to check if service worker has become ready
+                    try {
+                        await checkServiceWorkerStatus();
+                    } catch (error) {
+                        console.error('Service worker status check failed:', error);
+                    }
+                }
+            }, 30000); // Check every 30 seconds
         } else {
-          // Try to check if service worker has become ready
-          try {
-            await checkServiceWorkerStatus();
-          } catch (error) {
-            console.error('Service worker status check failed:', error);
-          }
+            updateServiceWorkerStatus('error', 'Not supported');
+            showStatus('Service Worker not supported in your browser. Some features may not work.', 'error');
         }
-      }, 30000); // Check every 30 seconds
-    } else {
-      updateServiceWorkerStatus('error', 'Not supported');
-      showStatus('Service Worker not supported in your browser. Some features may not work.', 'error');
-    }
-  </script>
+    </script>
 </body>
 </html>

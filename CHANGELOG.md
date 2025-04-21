@@ -4,6 +4,18 @@ All notable changes to the GNews-Summarizer project will be documented in this f
 
 ## [Unreleased]
 
+### Added
+- **Improved Error Handling**:
+  - Added comprehensive cleanup in all error paths in service worker
+  - Added new error phase indicator in progress tracking
+  - Added direct retry capability for temporary errors
+  - Added error classification with visual indicators
+- **Enhanced Service Worker Communication**:
+  - Implemented adaptive timeouts for service worker communication
+  - Added connection quality indicators (fast, medium, slow)
+  - Added better retrying mechanism for transient failures
+  - Improved error recovery for API request failures
+
 ## [0.2.0] - 2025-04-21
 
 ### Added
