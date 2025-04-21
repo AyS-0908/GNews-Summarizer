@@ -23,8 +23,10 @@ The app includes ready-to-use code for:
 - Displays AI-generated summaries with loading indicators
 - Batch processing mode for multiple articles
 - Visual progress tracking for batch summarization
+- Comprehensive error handling with retry capabilities
+- Intelligent error classification and user-friendly messages
 - 100% static, serverless architecture
-- No middleware required (direct API API calls)
+- No middleware required (direct API calls)
 
 ## Using It
 
@@ -41,6 +43,21 @@ The app includes ready-to-use code for:
 4. Click "Summarize Queue" to process all queued articles
 5. Track progress with the visual progress bar
 6. View all summaries when processing completes
+
+### Error Handling
+- Network issues: The app will automatically retry temporary network failures
+- API rate limits: Clearly identifies rate limit errors with helpful guidance
+- Authentication issues: Provides clear instructions when API keys are invalid
+- Retry capability: Failed summaries can be re-queued with a single click
+
+## Troubleshooting
+
+Common issues and solutions:
+
+- **"API Key Invalid"**: Verify your API key is correct and active in your provider's dashboard
+- **"Rate Limit Exceeded"**: Wait a few minutes and try again, or switch to a different AI provider
+- **"Network Error"**: Check your internet connection and try again
+- **"Invalid URL"**: Ensure you're sharing from a supported news source
 
 ## Note
 Make sure to keep your API keys secure. For best security, configure your API key with domain restrictions to only work from your app's domain.
