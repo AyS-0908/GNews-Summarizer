@@ -34,6 +34,9 @@ const RATE_LIMITS = {
 let apiCallHistory = {};
 let lastCleanup = Date.now();
 
+/* Progress tracking for single article summarization */
+let activeSummarizations = {};
+
 /* 1) Standard install / activate with cache management */
 self.addEventListener('install', evt => {
   evt.waitUntil(
@@ -178,6 +181,17 @@ self.addEventListener('message', async event => {
         timestamp: Date.now()
       });
     }
+  } else if (messageAction === 'getSummaryProgress') {
+    // Return progress info for a specific summarization
+    const url = event.data.url;
+    if (event.source && url) {
+      const progress = activeSummarizations[url] || null;
+      event.source.postMessage({
+        action: 'summaryProgress',
+        url: url,
+        progress: progress
+      });
+    }
   }
 });
 
@@ -272,6 +286,20 @@ async function getCachedSummary(url, maxAge = CACHE_EXPIRATION) {
  * @returns {Promise<Response>} Response indicating if summary is ready
  */
 async function checkSummaryStatus(url) {
+  // Check if there's an active summarization in progress for this URL
+  const progress = activeSummarizations[url];
+  if (progress) {
+    return new Response(JSON.stringify({ 
+      ready: false, 
+      inProgress: true,
+      progress: progress 
+    }), {
+      status: 202,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+  
+  // Check if the summary is cached
   const summary = await getCachedSummary(url);
   
   if (summary) {
@@ -322,7 +350,9 @@ async function handleApiSummarize(url) {
       return new Response(JSON.stringify({ 
         error: `Rate limit exceeded. Please try again after ${rateLimitCheck.retryAfterSeconds} seconds.`,
         errorType: ErrorType.RATE_LIMIT,
-        retryAfter: rateLimitCheck.retryAfterSeconds
+        retryAfter: rateLimitCheck.retryAfterSeconds,
+        severity: ErrorSeverity.TEMPORARY,
+        troubleshooting: getTroubleshooting(ErrorType.RATE_LIMIT)
       }), {
         status: 429,
         headers: { 
@@ -332,7 +362,14 @@ async function handleApiSummarize(url) {
       });
     }
     
+    // Setup progress tracking
+    setupProgressTracking(url);
+    
+    // Get the summary (this function updates progress internally)
     const summary = await getSummary(url, config);
+    
+    // Cleanup progress tracking
+    cleanupProgressTracking(url);
     
     // Cache the result
     await cacheSummary(url, summary);
@@ -344,13 +381,24 @@ async function handleApiSummarize(url) {
       headers: { 'Content-Type': 'application/json' }
     });
   } catch (error) {
-    const errorMessage = error instanceof SummarizerError 
-      ? getUserFriendlyErrorMessage(error)
-      : `Error: ${error.message}`;
+    // Cleanup progress tracking
+    cleanupProgressTracking(url);
+    
+    // Get detailed error information
+    const errorInfo = error instanceof SummarizerError 
+      ? getDetailedErrorInfo(error)
+      : {
+          message: `Error: ${error.message}`,
+          type: ErrorType.UNKNOWN,
+          severity: ErrorSeverity.CRITICAL,
+          troubleshooting: getTroubleshooting(ErrorType.UNKNOWN)
+        };
       
-    return new Response(JSON.stringify({ 
-      error: errorMessage,
-      errorType: error instanceof SummarizerError ? error.type : ErrorType.UNKNOWN
+    return new Response(JSON.stringify({
+      error: errorInfo.message,
+      errorType: errorInfo.type,
+      severity: errorInfo.severity,
+      troubleshooting: errorInfo.troubleshooting
     }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
@@ -372,6 +420,96 @@ async function clearSummaryCache() {
     console.error('Failed to clear cache:', error);
     return false;
   }
+}
+
+/**
+ * Progress tracking functions for single article summarization
+ */
+
+/**
+ * Set up progress tracking for a URL summarization
+ * @param {string} url - The URL being summarized
+ */
+function setupProgressTracking(url) {
+  activeSummarizations[url] = {
+    startTime: Date.now(),
+    phase: 'initializing',
+    percent: 0,
+    estimatedTimeRemaining: estimateSummarizationTime(),
+  };
+  
+  // Broadcast initial progress
+  broadcastProgress(url);
+}
+
+/**
+ * Clean up progress tracking when summarization is complete
+ * @param {string} url - The URL that was summarized
+ */
+function cleanupProgressTracking(url) {
+  if (activeSummarizations[url]) {
+    delete activeSummarizations[url];
+  }
+}
+
+/**
+ * Update progress for a summarization
+ * @param {string} url - The URL being summarized
+ * @param {string} phase - Current phase of summarization
+ * @param {number} percent - Percentage complete (0-100)
+ */
+function updateProgress(url, phase, percent) {
+  if (!activeSummarizations[url]) return;
+  
+  const progress = activeSummarizations[url];
+  progress.phase = phase;
+  progress.percent = percent;
+  
+  // Recalculate estimated time remaining
+  const elapsed = Date.now() - progress.startTime;
+  if (percent > 0) {
+    const totalEstimate = (elapsed / percent) * 100;
+    progress.estimatedTimeRemaining = Math.max(0, totalEstimate - elapsed);
+  }
+  
+  // Broadcast progress update
+  broadcastProgress(url);
+}
+
+/**
+ * Broadcast progress to all connected clients
+ * @param {string} url - The URL being summarized
+ */
+async function broadcastProgress(url) {
+  const clients = await self.clients.matchAll();
+  const progress = activeSummarizations[url];
+  
+  if (progress && clients.length > 0) {
+    clients.forEach(client => {
+      client.postMessage({
+        action: 'summaryProgress',
+        url: url,
+        progress: progress
+      });
+    });
+  }
+}
+
+/**
+ * Estimate total time needed for summarization based on provider
+ * @param {string} provider - AI provider name
+ * @returns {number} Estimated time in milliseconds
+ */
+function estimateSummarizationTime(provider = 'default') {
+  // Average times based on provider
+  const estimates = {
+    'openai': 10000,      // 10 seconds
+    'anthropic': 12000,   // 12 seconds
+    'deepseek': 8000,     // 8 seconds
+    'default': 10000      // 10 seconds default
+  };
+  
+  return estimates[provider] || estimates.default;
 }
 
 /**
@@ -722,25 +860,281 @@ async function addToQueue(url) {
  * Error types for better error classification
  */
 const ErrorType = {
+  // Network and connectivity issues
   NETWORK: 'NETWORK',
-  API_KEY: 'API_KEY',
-  RATE_LIMIT: 'RATE_LIMIT',
-  INVALID_URL: 'INVALID_URL',
+  CORS: 'CORS',
   TIMEOUT: 'TIMEOUT',
+  
+  // Authorization and authentication
+  API_KEY: 'API_KEY',
+  AUTHORIZATION: 'AUTHORIZATION',
+  
+  // Rate limiting and quotas
+  RATE_LIMIT: 'RATE_LIMIT',
+  QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
+  
+  // Input validation
+  INVALID_URL: 'INVALID_URL',
+  INVALID_CONTENT: 'INVALID_CONTENT',
+  CONTENT_BLOCKED: 'CONTENT_BLOCKED',
+  
+  // AI provider issues
   SERVER: 'SERVER',
+  MODEL_ERROR: 'MODEL_ERROR',
+  CONTENT_FILTER: 'CONTENT_FILTER',
+  
+  // Application errors
+  CONFIG_ERROR: 'CONFIG_ERROR',
+  CACHE_ERROR: 'CACHE_ERROR',
+  
+  // Generic fallback
   UNKNOWN: 'UNKNOWN'
+};
+
+/**
+ * Error severity levels
+ */
+const ErrorSeverity = {
+  // Temporary issues that might resolve on retry
+  TEMPORARY: 'temporary',
+  
+  // Issues that require user action to fix
+  FIXABLE: 'fixable',
+  
+  // Serious issues that may require technical support
+  CRITICAL: 'critical'
 };
 
 /**
  * Custom error class with error type classification
  */
 class SummarizerError extends Error {
-  constructor(message, type = ErrorType.UNKNOWN, originalError = null) {
+  constructor(message, type = ErrorType.UNKNOWN, originalError = null, severity = null) {
     super(message);
     this.name = 'SummarizerError';
     this.type = type;
     this.originalError = originalError;
+    
+    // Auto-assign severity based on error type if not specified
+    this.severity = severity || this.determineSeverity(type);
   }
+  
+  /**
+   * Determine error severity based on type
+   * @param {string} type - Error type
+   * @returns {string} Severity level
+   */
+  determineSeverity(type) {
+    // Temporary errors that might resolve on retry
+    if ([
+      ErrorType.NETWORK, 
+      ErrorType.TIMEOUT,
+      ErrorType.RATE_LIMIT, 
+      ErrorType.SERVER
+    ].includes(type)) {
+      return ErrorSeverity.TEMPORARY;
+    }
+    
+    // Errors that require user action to fix
+    if ([
+      ErrorType.API_KEY,
+      ErrorType.INVALID_URL,
+      ErrorType.INVALID_CONTENT,
+      ErrorType.AUTHORIZATION
+    ].includes(type)) {
+      return ErrorSeverity.FIXABLE;
+    }
+    
+    // Critical errors that may need technical support
+    if ([
+      ErrorType.QUOTA_EXCEEDED,
+      ErrorType.CONFIG_ERROR,
+      ErrorType.CACHE_ERROR,
+      ErrorType.CONTENT_FILTER,
+      ErrorType.CORS
+    ].includes(type)) {
+      return ErrorSeverity.CRITICAL;
+    }
+    
+    // Default
+    return ErrorSeverity.CRITICAL;
+  }
+}
+
+/**
+ * Gets troubleshooting steps for a specific error type
+ * @param {string} errorType - The error type
+ * @returns {Object} Troubleshooting information
+ */
+function getTroubleshooting(errorType) {
+  const troubleshooting = {
+    [ErrorType.NETWORK]: {
+      title: 'Network Connection Issues',
+      steps: [
+        'Check that your device has a stable internet connection',
+        'Try switching between Wi-Fi and mobile data if available',
+        'Disable any VPN or proxy services that might be interfering',
+        'If on public Wi-Fi, try connecting to a different network'
+      ]
+    },
+    [ErrorType.CORS]: {
+      title: 'Content Access Restricted',
+      steps: [
+        'The article may be behind a paywall or subscription',
+        'Try sharing a different article from a more accessible source',
+        'Some news sites block AI services from accessing their content'
+      ]
+    },
+    [ErrorType.TIMEOUT]: {
+      title: 'Request Timed Out',
+      steps: [
+        'Try again when your internet connection is stronger',
+        'The AI service might be experiencing high traffic',
+        'Wait a few minutes and try your request again',
+        'Try a different AI provider in the settings'
+      ]
+    },
+    [ErrorType.API_KEY]: {
+      title: 'API Key Issues',
+      steps: [
+        'Your API key may be invalid or expired',
+        'Go to "Configure AI Provider" to update your API key',
+        'Check your account status on the AI provider\'s website',
+        'Try configuring a different AI provider'
+      ]
+    },
+    [ErrorType.AUTHORIZATION]: {
+      title: 'Authorization Failed',
+      steps: [
+        'Your API key may not have permission for this request',
+        'Check if your subscription is still active',
+        'Verify your account status on the provider\'s website',
+        'You may need to upgrade your plan with the AI provider'
+      ]
+    },
+    [ErrorType.RATE_LIMIT]: {
+      title: 'Rate Limit Exceeded',
+      steps: [
+        'You\'ve made too many requests in a short period',
+        'Wait a few minutes before trying again',
+        'Try a different AI provider with higher rate limits',
+        'Consider upgrading your API plan for higher limits'
+      ]
+    },
+    [ErrorType.QUOTA_EXCEEDED]: {
+      title: 'Usage Quota Exceeded',
+      steps: [
+        'You\'ve exceeded your monthly/daily quota with this AI provider',
+        'Check your usage on the provider\'s dashboard',
+        'Try configuring a different AI provider',
+        'Consider upgrading your plan for higher usage limits'
+      ]
+    },
+    [ErrorType.INVALID_URL]: {
+      title: 'Invalid Article URL',
+      steps: [
+        'Make sure you\'re sharing a news article link',
+        'The URL format may be incorrect or incomplete',
+        'Try sharing the article from the site\'s main page',
+        'Some social media preview links may not work correctly'
+      ]
+    },
+    [ErrorType.INVALID_CONTENT]: {
+      title: 'Content Issues',
+      steps: [
+        'The shared link may not contain an actual article',
+        'Try sharing a regular news article instead',
+        'Some dynamic or JavaScript-heavy pages may not work',
+        'The content might be in a format the AI can\'t process'
+      ]
+    },
+    [ErrorType.CONTENT_BLOCKED]: {
+      title: 'Content Access Denied',
+      steps: [
+        'The article may require login or subscription',
+        'The site may be blocking automated access',
+        'Try with a different article from a more open source',
+        'Some news sites actively block AI systems'
+      ]
+    },
+    [ErrorType.SERVER]: {
+      title: 'AI Service Issues',
+      steps: [
+        'The AI provider\'s servers may be experiencing problems',
+        'This is usually temporary - try again later',
+        'Check the provider\'s status page for outages',
+        'Try configuring a different AI provider'
+      ]
+    },
+    [ErrorType.MODEL_ERROR]: {
+      title: 'AI Model Error',
+      steps: [
+        'The AI model encountered an internal error',
+        'Try again - these errors are often temporary',
+        'The article may contain content that confused the AI',
+        'Try with a different model or provider'
+      ]
+    },
+    [ErrorType.CONTENT_FILTER]: {
+      title: 'Content Filter Triggered',
+      steps: [
+        'The article may contain content that violated AI policies',
+        'Some topics may be restricted by the AI provider',
+        'Try summarizing a different article',
+        'Consider using a different AI provider'
+      ]
+    },
+    [ErrorType.CONFIG_ERROR]: {
+      title: 'Configuration Error',
+      steps: [
+        'There may be an issue with your app configuration',
+        'Try reconfiguring your AI provider',
+        'Clear your browser data and try again',
+        'Reinstall the app if the problem persists'
+      ]
+    },
+    [ErrorType.CACHE_ERROR]: {
+      title: 'Cache Error',
+      steps: [
+        'There was an issue accessing the app\'s cache',
+        'Try clearing the cache from the settings',
+        'Restart your browser or device',
+        'Reinstall the app if the problem persists'
+      ]
+    },
+    [ErrorType.UNKNOWN]: {
+      title: 'Unexpected Error',
+      steps: [
+        'An unexpected error occurred during processing',
+        'Try your request again',
+        'Restart the app or refresh the page',
+        'Try with a different article or AI provider',
+        'If the problem persists, please report the issue'
+      ]
+    }
+  };
+  
+  return troubleshooting[errorType] || troubleshooting[ErrorType.UNKNOWN];
+}
+
+/**
+ * Gets detailed error information with user-friendly message and troubleshooting
+ * @param {SummarizerError} error - The error object
+ * @returns {Object} Detailed error information
+ */
+function getDetailedErrorInfo(error) {
+  // Get the basic user-friendly message
+  const baseMessage = getUserFriendlyErrorMessage(error);
+  
+  // Get troubleshooting steps
+  const troubleshooting = getTroubleshooting(error.type);
+  
+  return {
+    message: baseMessage,
+    type: error.type,
+    severity: error.severity,
+    troubleshooting: troubleshooting
+  };
 }
 
 /**
@@ -752,18 +1146,51 @@ function getUserFriendlyErrorMessage(error) {
   switch (error.type) {
     case ErrorType.NETWORK:
       return 'Network connection error. Please check your internet connection and try again.';
+    
+    case ErrorType.CORS:
+      return 'Cannot access the article content. The website might be blocking access or require a subscription.';
+    
     case ErrorType.API_KEY:
-      return 'Invalid API key. Please update your API key in the configuration.';
+      return 'Invalid API key. Please update your API key in the configuration settings.';
+    
+    case ErrorType.AUTHORIZATION:
+      return 'Your API key doesn\'t have permission for this request. Please check your subscription status.';
+    
     case ErrorType.RATE_LIMIT:
       return 'API rate limit exceeded. Please try again later or switch to a different AI provider.';
+    
+    case ErrorType.QUOTA_EXCEEDED:
+      return 'You\'ve exceeded your usage quota with this AI provider. Consider switching providers or upgrading your plan.';
+    
     case ErrorType.INVALID_URL:
-      return 'Invalid article URL. Please make sure you\'re sharing a valid news article.';
+      return 'Invalid article URL. Please make sure you\'re sharing a valid news article from Google News.';
+    
+    case ErrorType.INVALID_CONTENT:
+      return 'The shared content doesn\'t appear to be a standard article. Try sharing a regular news article.';
+    
+    case ErrorType.CONTENT_BLOCKED:
+      return 'The article content is restricted. It may require a subscription or login to access.';
+    
     case ErrorType.TIMEOUT:
       return 'Request timed out. The AI service might be experiencing high load. Please try again later.';
+    
     case ErrorType.SERVER:
-      return 'The AI service is experiencing issues. Please try again later.';
+      return 'The AI service is experiencing issues. Please try again later or switch providers.';
+    
+    case ErrorType.MODEL_ERROR:
+      return 'The AI model encountered an error processing this article. Try a different model or provider.';
+    
+    case ErrorType.CONTENT_FILTER:
+      return 'The article contains content that triggered the AI\'s content filter. Try a different article.';
+    
+    case ErrorType.CONFIG_ERROR:
+      return 'There\'s an issue with your app configuration. Try reconfiguring your AI provider.';
+    
+    case ErrorType.CACHE_ERROR:
+      return 'Error accessing the app cache. Try clearing the cache from the settings.';
+    
     default:
-      return `Unexpected error: ${error.message}`;
+      return `Unexpected error: ${error.message || 'Unknown error'}`;
   }
 }
 
@@ -774,33 +1201,85 @@ function getUserFriendlyErrorMessage(error) {
  * @returns {SummarizerError} Classified error
  */
 function classifyError(error, response = null) {
+  const errorMessage = error.message || 'Unknown error';
+  
   // Network errors (no response)
   if (!response) {
-    if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+    if (errorMessage.includes('NetworkError') || errorMessage.includes('Failed to fetch')) {
       return new SummarizerError('Network connection error', ErrorType.NETWORK, error);
     }
-    if (error.message.includes('timeout') || error.message.includes('Timed out')) {
+    if (errorMessage.includes('timeout') || errorMessage.includes('Timed out')) {
       return new SummarizerError('Request timed out', ErrorType.TIMEOUT, error);
     }
-    return new SummarizerError(error.message, ErrorType.UNKNOWN, error);
+    if (errorMessage.includes('CORS') || errorMessage.includes('cross-origin')) {
+      return new SummarizerError('Cross-origin access blocked', ErrorType.CORS, error);
+    }
+    return new SummarizerError(errorMessage, ErrorType.UNKNOWN, error);
+  }
+  
+  // Look for specific error messages in the response
+  let responseBody = '';
+  try {
+    if (typeof response.clone === 'function') {
+      // Try to get response body for more context if available
+      const clonedResponse = response.clone();
+      if (clonedResponse.text) {
+        responseBody = clonedResponse.text();
+      }
+    }
+  } catch (e) {
+    // Ignore errors when trying to get response body
+  }
+  
+  // Check for content filtering or policy violations in error response
+  if (responseBody) {
+    const lowerBody = responseBody.toLowerCase();
+    if (lowerBody.includes('content filter') || 
+        lowerBody.includes('policy violation') || 
+        lowerBody.includes('content policy')) {
+      return new SummarizerError('Content filter triggered', ErrorType.CONTENT_FILTER, error);
+    }
+    
+    if (lowerBody.includes('quota') || lowerBody.includes('limit exceeded')) {
+      return new SummarizerError('Usage quota exceeded', ErrorType.QUOTA_EXCEEDED, error);
+    }
   }
   
   // HTTP status based errors
   switch (response.status) {
     case 401:
-    case 403:
       return new SummarizerError('Invalid API key', ErrorType.API_KEY, error);
+      
+    case 403:
+      return new SummarizerError('Access denied', ErrorType.AUTHORIZATION, error);
+      
     case 429:
       return new SummarizerError('Rate limit exceeded', ErrorType.RATE_LIMIT, error);
+      
     case 400:
-      return new SummarizerError('Invalid request format', ErrorType.INVALID_URL, error);
+      // Try to distinguish between different 400 errors
+      if (errorMessage.includes('url') || errorMessage.includes('URL')) {
+        return new SummarizerError('Invalid article URL', ErrorType.INVALID_URL, error);
+      } else if (errorMessage.includes('content')) {
+        return new SummarizerError('Invalid content format', ErrorType.INVALID_CONTENT, error);
+      } else {
+        return new SummarizerError('Invalid request format', ErrorType.INVALID_URL, error);
+      }
+      
+    case 402:
+      return new SummarizerError('Payment required', ErrorType.QUOTA_EXCEEDED, error);
+      
+    case 404:
+      return new SummarizerError('Resource not found', ErrorType.INVALID_URL, error);
+      
     case 500:
     case 502:
     case 503:
     case 504:
-      return new SummarizerError('Server error', ErrorType.SERVER, error);
+      return new SummarizerError('AI service error', ErrorType.SERVER, error);
+      
     default:
-      return new SummarizerError(`Error (${response.status})`, ErrorType.UNKNOWN, error);
+      return new SummarizerError(`Error (${response.status}): ${errorMessage}`, ErrorType.UNKNOWN, error);
   }
 }
 
@@ -902,12 +1381,17 @@ async function getSummary(url, config) {
     );
   }
   
+  // Update progress - starting API call
+  updateProgress(url, 'connecting', 10);
+  
   let summaryText = '';
   let aiResponse = null;
   
   try {
     // Format the AI prompt based on article URL
     const promptText = `Please provide a concise summary of this news article: ${url}. Focus on the key facts, main points, and important context.`;
+    
+    updateProgress(url, 'sending-request', 25);
     
     // Call the appropriate AI provider
     if (config.provider === 'openai') {
@@ -932,11 +1416,15 @@ async function getSummary(url, config) {
       // Record the API call for rate limiting
       recordApiCall('openai');
       
+      updateProgress(url, 'processing', 50);
+      
       // Handle HTTP errors
       if (!aiResponse.ok) {
         const errorText = await aiResponse.text().catch(() => 'Unknown error');
         throw new Error(errorText);
       }
+      
+      updateProgress(url, 'receiving-response', 75);
       
       const data = await aiResponse.json();
       
@@ -970,11 +1458,15 @@ async function getSummary(url, config) {
       // Record the API call for rate limiting
       recordApiCall('anthropic');
       
+      updateProgress(url, 'processing', 50);
+      
       // Handle HTTP errors
       if (!aiResponse.ok) {
         const errorText = await aiResponse.text().catch(() => 'Unknown error');
         throw new Error(errorText);
       }
+      
+      updateProgress(url, 'receiving-response', 75);
       
       const data = await aiResponse.json();
       
@@ -1007,11 +1499,15 @@ async function getSummary(url, config) {
       // Record the API call for rate limiting
       recordApiCall('deepseek');
       
+      updateProgress(url, 'processing', 50);
+      
       // Handle HTTP errors
       if (!aiResponse.ok) {
         const errorText = await aiResponse.text().catch(() => 'Unknown error');
         throw new Error(errorText);
       }
+      
+      updateProgress(url, 'receiving-response', 75);
       
       const data = await aiResponse.json();
       
@@ -1031,8 +1527,14 @@ async function getSummary(url, config) {
       throw new SummarizerError('Empty summary returned', ErrorType.UNKNOWN);
     }
     
+    // Final progress update
+    updateProgress(url, 'finalizing', 90);
+    
     // Cache the successful result
     await cacheSummary(url, summaryText);
+    
+    // Complete progress
+    updateProgress(url, 'complete', 100);
     
     return summaryText;
   } catch (error) {
@@ -1096,16 +1598,23 @@ async function processBatchArticles(articles) {
         fromCache: fromCache
       });
     } catch (error) {
-      // Use friendly error messages
-      const errorMessage = error instanceof SummarizerError 
-        ? getUserFriendlyErrorMessage(error)
-        : `Error: ${error.message}`;
-        
+      // Get detailed error info
+      const errorInfo = error instanceof SummarizerError 
+        ? getDetailedErrorInfo(error)
+        : {
+            message: `Error: ${error.message || 'Unknown error'}`,
+            type: ErrorType.UNKNOWN,
+            severity: ErrorSeverity.CRITICAL,
+            troubleshooting: getTroubleshooting(ErrorType.UNKNOWN)
+          };
+      
       results.push({
         url: article.url,
-        summary: errorMessage,
+        summary: errorInfo.message,
         success: false,
-        errorType: error instanceof SummarizerError ? error.type : ErrorType.UNKNOWN
+        errorType: errorInfo.type,
+        severity: errorInfo.severity,
+        troubleshooting: errorInfo.troubleshooting
       });
       
       // If rate limited, stop processing and return what we have so far
@@ -1227,9 +1736,12 @@ async function handleShare(request) {
     );
   }
 
-  // Standard single summarization flow with loading indicator
+  // Standard single summarization flow with loading indicator and progress tracking
   try {
-    // Return loading state first
+    // Setup progress tracking
+    setupProgressTracking(sharedURL);
+    
+    // Return loading state with progress indicators
     return new Response(`
        <!doctype html><html><head><meta charset="utf-8">
        <title>Generating Summary...</title><style>
@@ -1237,37 +1749,164 @@ async function handleShare(request) {
           pre{white-space:pre-wrap}
           .spinner{width:40px;height:40px;margin:20px auto;border:4px solid rgba(0,0,0,.1);border-radius:50%;border-top-color:#4F46E5;animation:spin 1s ease-in-out infinite}
           @keyframes spin{to{transform:rotate(360deg)}}
+          @keyframes pulse{0%{opacity:0.6}50%{opacity:1}100%{opacity:0.6}}
           .message{margin-top:20px;color:#6b7280}
+          .progress-container{width:100%;max-width:300px;height:6px;background:#e2e8f0;border-radius:3px;margin:20px auto;overflow:hidden}
+          .progress-bar{height:100%;background:#4F46E5;width:0%;transition:width 0.5s ease}
+          .pulse{animation:pulse 2s infinite ease-in-out}
+          .progress-info{font-size:0.8rem;color:#6b7280;margin-top:10px}
+          .progress-phase{font-weight:bold;margin-right:5px}
+          .progress-time{font-style:italic}
+          .error-container{background:#fef2f2;border-radius:8px;padding:1rem;margin-top:2rem;text-align:left;display:none}
+          .error-title{color:#991b1b;margin-top:0}
        </style>
        <script>
-         // Auto-refresh to check summary status
-         async function checkSummary() {
+         // Advanced progress tracking
+         let progressBar = null;
+         let progressPhase = null;
+         let progressTime = null;
+         let errorContainer = null;
+         
+         // Format time remaining
+         function formatTimeRemaining(ms) {
+           if (ms <= 0) return 'almost done';
+           if (ms < 10000) return 'just a few seconds';
+           const seconds = Math.floor(ms / 1000);
+           return seconds > 60 
+             ? \`about \${Math.floor(seconds / 60)} minute\${Math.floor(seconds / 60) > 1 ? 's' : ''}\` 
+             : \`about \${seconds} seconds\`;
+         }
+         
+         // Format current phase
+         function formatPhase(phase) {
+           const phases = {
+             'initializing': 'Preparing',
+             'connecting': 'Connecting to AI',
+             'sending-request': 'Sending request',
+             'processing': 'AI is analyzing',
+             'receiving-response': 'Receiving summary',
+             'finalizing': 'Finalizing',
+             'complete': 'Completed'
+           };
+           return phases[phase] || phase;
+         }
+         
+         // Update progress display
+         function updateProgressDisplay(progress) {
+           if (!progressBar) {
+             progressBar = document.getElementById('progressBar');
+             progressPhase = document.getElementById('progressPhase');
+             progressTime = document.getElementById('progressTime');
+           }
+           
+           if (progressBar && progress) {
+             progressBar.style.width = \`\${progress.percent}%\`;
+             progressPhase.textContent = formatPhase(progress.phase);
+             
+             if (progress.estimatedTimeRemaining > 0) {
+               progressTime.textContent = \`\${formatTimeRemaining(progress.estimatedTimeRemaining)}\`;
+               progressTime.parentElement.style.display = 'block';
+             } else {
+               progressTime.parentElement.style.display = 'none';
+             }
+           }
+         }
+         
+         // Show error
+         function showError(error) {
+           if (!errorContainer) {
+             errorContainer = document.getElementById('errorContainer');
+           }
+           
+           if (errorContainer) {
+             const title = document.getElementById('errorTitle');
+             const message = document.getElementById('errorMessage');
+             
+             title.textContent = error.title || 'Error occurred';
+             message.textContent = error.message || 'Something went wrong during summarization';
+             
+             errorContainer.style.display = 'block';
+             
+             // Hide progress elements
+             document.getElementById('progressSection').style.display = 'none';
+           }
+         }
+         
+         // Check summary status with progress
+         async function checkSummaryProgress() {
            const url = '${sharedURL}';
            try {
              const response = await fetch('./summary-status?url=' + encodeURIComponent(url));
+             const data = await response.json();
+             
+             if (data.ready) {
+               // Summary is ready, reload page
+               window.location.reload();
+             } else if (data.inProgress && data.progress) {
+               // Update progress display
+               updateProgressDisplay(data.progress);
+               setTimeout(checkSummaryProgress, 1000);
+             } else {
+               // No progress info yet, start normal processing
+               setTimeout(startProcessing, 500);
+             }
+           } catch (e) {
+             console.error('Error checking status:', e);
+             setTimeout(checkSummaryProgress, 2000);
+           }
+         }
+         
+         // Start summary processing
+         async function startProcessing() {
+           try {
+             const response = await fetch('./api/summarize?url=${encodeURIComponent(sharedURL)}');
              if (response.ok) {
                window.location.reload();
              } else {
-               setTimeout(checkSummary, 2000);
+               const errorData = await response.json();
+               if (errorData.error) {
+                 showError({
+                   title: errorData.troubleshooting?.title || 'Error',
+                   message: errorData.error
+                 });
+               } else {
+                 setTimeout(() => window.location.reload(), 3000);
+               }
              }
-           } catch (e) {
-             setTimeout(checkSummary, 2000);
+           } catch (err) {
+             console.error('Error starting summarization:', err);
+             setTimeout(() => window.location.reload(), 3000);
            }
          }
-         // Start polling after page loads
-         setTimeout(() => {
-           const summaryText = document.getElementById('summaryText');
-           if (!summaryText) {
-             fetch('./api/summarize?url=${encodeURIComponent(sharedURL)}')
-               .then(response => window.location.reload())
-               .catch(err => setTimeout(() => window.location.reload(), 3000));
-           }
-         }, 3000);
+         
+         // Start checking progress when page loads
+         document.addEventListener('DOMContentLoaded', () => {
+           checkSummaryProgress();
+         });
        </script>
        </head><body>
-       <h2>Generating Summary...</h2>
-       <div class="spinner"></div>
-       <p class="message">Analyzing article using AI, please wait...</p>
+       <h2>Generating Summary</h2>
+       
+       <div id="progressSection">
+         <div class="spinner"></div>
+         <div class="progress-container">
+           <div class="progress-bar" id="progressBar" style="width:5%"></div>
+         </div>
+         <p class="progress-info">
+           <span class="progress-phase" id="progressPhase">Initializing</span>
+           <span class="pulse">•</span>
+         </p>
+         <p class="progress-info" style="display:none">
+           Estimated time: <span class="progress-time" id="progressTime">calculating...</span>
+         </p>
+         <p class="message">Analyzing article using AI, please wait...</p>
+       </div>
+       
+       <div id="errorContainer" class="error-container">
+         <h3 class="error-title" id="errorTitle">Error</h3>
+         <p id="errorMessage">An error occurred while generating the summary.</p>
+         <button onclick="window.location.reload()" style="background:#4F46E5;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;margin-top:1rem;cursor:pointer">Try Again</button>
+       </div>
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
 
@@ -1286,6 +1925,10 @@ async function handleShare(request) {
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
   } catch (error) {
+    // Clean up progress tracking
+    cleanupProgressTracking(sharedURL);
+    
+    // Create error response
     return createErrorResponse(error);
   }
 }
@@ -1296,62 +1939,159 @@ async function handleShare(request) {
  * @returns {Response} HTML error response
  */
 function createErrorResponse(error) {
-  // Get user-friendly error message
-  const errorMessage = error instanceof SummarizerError 
-    ? getUserFriendlyErrorMessage(error)
-    : `Error: ${error.message}`;
+  // Get detailed error info
+  const errorInfo = error instanceof SummarizerError 
+    ? getDetailedErrorInfo(error)
+    : {
+        message: `Error: ${error.message || 'Unknown error'}`,
+        type: ErrorType.UNKNOWN,
+        severity: ErrorSeverity.CRITICAL,
+        troubleshooting: getTroubleshooting(ErrorType.UNKNOWN)
+      };
+  
+  // Special styling based on error severity
+  let severityClass = '';
+  switch (errorInfo.severity) {
+    case ErrorSeverity.TEMPORARY:
+      severityClass = 'temporary-error';
+      break;
+    case ErrorSeverity.FIXABLE:
+      severityClass = 'fixable-error';
+      break;
+    case ErrorSeverity.CRITICAL:
+      severityClass = 'critical-error';
+      break;
+  }
+  
+  // Format troubleshooting steps as HTML list
+  const stepsHtml = errorInfo.troubleshooting.steps.map(step => `<li>${step}</li>`).join('');
+  
+  // Prepare special actions based on error type
+  let specialActions = '';
   
   // Special handling for rate limit errors
-  let retrySection = '';
-  if (error instanceof SummarizerError && error.type === ErrorType.RATE_LIMIT) {
-    retrySection = `
-      <div style="margin-top: 1.5rem; padding: 1rem; background: #eff6ff; border-radius: 4px; color: #1e40af;">
-        <h3 style="margin-top: 0; color: #1e3a8a;">Rate Limit Information</h3>
-        <p>You've reached the usage limit for your current AI provider. You can:</p>
-        <ul>
-          <li>Wait a few minutes before trying again</li>
-          <li><a href="./landing.html" style="color: #2563eb;">Configure a different AI provider</a></li>
-          <li>Add this article to your queue for later processing</li>
-        </ul>
-        <button onclick="window.location.reload()" style="background: #3b82f6; color: white; border: none; padding: 0.5rem 1rem; border-radius: 4px; margin-top: 0.5rem; cursor: pointer;">Try Again</button>
+  if (errorInfo.type === ErrorType.RATE_LIMIT) {
+    specialActions = `
+      <div class="action-panel">
+        <h3>Options</h3>
+        <p>While waiting for rate limits to reset, you can:</p>
+        <div class="action-buttons">
+          <button onclick="window.location.href='./index.html?queue=true&url=${encodeURIComponent(error.url || '')}';" class="action-button">Add to Queue</button>
+          <button onclick="window.location.href='./landing.html';" class="action-button secondary">Try Another Provider</button>
+        </div>
       </div>
     `;
   }
   
-  // Create helpful error page
+  // Create helpful error page with detailed troubleshooting
   return new Response(`
     <!doctype html><html><head><meta charset="utf-8">
     <title>Error</title><style>
-       body{font-family:sans-serif;padding:2rem;line-height:1.4}
-       .error-container{background:#fef2f2;border-left:4px solid #ef4444;padding:1rem;border-radius:4px}
-       .error-title{color:#991b1b;margin-top:0}
-       .error-message{color:#1f2937}
-       .error-help{margin-top:1.5rem;color:#4b5563}
-       .error-help ul{padding-left:1.5rem}
-       .error-help li{margin-bottom:0.5rem}
-       .back-link{display:inline-block;margin-top:1.5rem;color:#4F46E5;text-decoration:none}
+       body{font-family:sans-serif;padding:2rem;line-height:1.4;max-width:600px;margin:0 auto}
+       
+       .error-container{
+         border-radius:8px;
+         padding:1.5rem;
+         margin-bottom:1.5rem;
+       }
+       
+       .temporary-error{
+         background:#fff7ed;
+         border-left:4px solid #f97316;
+       }
+       
+       .fixable-error{
+         background:#fef2f2;
+         border-left:4px solid #ef4444;
+       }
+       
+       .critical-error{
+         background:#fef2f2;
+         border-left:4px solid #b91c1c;
+       }
+       
+       .error-title{margin-top:0;color:#1e293b;font-size:1.3rem}
+       .error-message{color:#1f2937;font-size:1rem}
+       
+       .troubleshooting-panel{
+         background:#f8fafc;
+         border-radius:8px;
+         padding:1.5rem;
+         margin-bottom:1.5rem;
+       }
+       
+       .troubleshooting-panel h3{margin-top:0;color:#1e293b}
+       .troubleshooting-panel ul{padding-left:1.5rem;color:#4b5563}
+       .troubleshooting-panel li{margin-bottom:0.5rem}
+       
+       .action-panel{
+         background:#eff6ff;
+         border-radius:8px;
+         padding:1.5rem;
+         margin-bottom:1.5rem;
+       }
+       
+       .action-panel h3{margin-top:0;color:#1e40af}
+       .action-panel p{color:#1e40af;margin-bottom:1rem}
+       
+       .action-buttons{
+         display:flex;
+         gap:0.5rem;
+         flex-wrap:wrap;
+       }
+       
+       .action-button{
+         background:#3b82f6;
+         color:white;
+         border:none;
+         padding:0.5rem 1rem;
+         border-radius:4px;
+         cursor:pointer;
+         font-weight:500;
+       }
+       
+       .action-button:hover{background:#2563eb}
+       .action-button.secondary{background:#64748b}
+       .action-button.secondary:hover{background:#475569}
+       
+       .back-link{
+         display:inline-block;
+         margin-top:1rem;
+         color:#4F46E5;
+         text-decoration:none;
+       }
+       
        .back-link:hover{text-decoration:underline}
+       
+       @media (max-width: 640px) {
+         .action-buttons {
+           flex-direction: column;
+         }
+         
+         .action-button {
+           width: 100%;
+           margin-bottom: 0.5rem;
+         }
+       }
     </style></head><body>
     <h2>❌ Error occurred</h2>
     
-    <div class="error-container">
-      <h3 class="error-title">Failed to generate summary</h3>
-      <p class="error-message">${errorMessage}</p>
+    <div class="error-container ${severityClass}">
+      <h3 class="error-title">${errorInfo.troubleshooting.title}</h3>
+      <p class="error-message">${errorInfo.message}</p>
     </div>
     
-    ${retrySection}
+    ${specialActions}
     
-    <div class="error-help">
-      <h3>Troubleshooting tips:</h3>
+    <div class="troubleshooting-panel">
+      <h3>How to fix this:</h3>
       <ul>
-        <li>Make sure your internet connection is working</li>
-        <li>Verify that your API key is valid and correctly configured</li>
-        <li>Check that the shared URL is from a valid news article</li>
-        <li>Try again later if the AI service might be experiencing high load</li>
+        ${stepsHtml}
       </ul>
     </div>
     
     <a class="back-link" href="javascript:history.back()">← Back</a>
+    <button onclick="window.location.reload()" class="action-button" style="float:right">Try Again</button>
     </body></html>`,
     { headers:{'Content-Type':'text/html'} });
 }
