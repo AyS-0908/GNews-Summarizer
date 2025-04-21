@@ -279,6 +279,30 @@ self.addEventListener('message', async event => {
       });
     }
   }
+  // NEW: Export cached summaries
+  else if (messageAction === 'exportCachedSummaries') {
+    try {
+      const format = event.data.format || 'json'; // Default to JSON if not specified
+      const summaries = await exportCachedSummaries(format);
+      if (event.source) {
+        event.source.postMessage({
+          action: 'exportSummariesResult',
+          success: true,
+          data: summaries,
+          format: format
+        });
+      }
+    } catch (error) {
+      console.error('Failed to export cached summaries:', error);
+      if (event.source) {
+        event.source.postMessage({
+          action: 'exportSummariesResult',
+          success: false,
+          error: error.message
+        });
+      }
+    }
+  }
 });
 
 /**
@@ -520,6 +544,66 @@ async function listCachedSummaries() {
   } catch (error) {
     console.error('Failed to list cached summaries:', error);
     return [];
+  }
+}
+
+/**
+ * Get the full content of all cached summaries
+ * @param {string} format - Output format ('json' or 'csv')
+ * @returns {Promise<string>} Exported summaries in requested format
+ */
+async function exportCachedSummaries(format = 'json') {
+  try {
+    const cache = await caches.open(SUMMARY_CACHE);
+    const requests = await cache.keys();
+    const summaries = [];
+    
+    for (const request of requests) {
+      try {
+        // Get the response from cache
+        const response = await cache.match(request);
+        if (!response) continue;
+        
+        // Parse the JSON data
+        const data = await response.json();
+        
+        // Add to results with full summary text
+        summaries.push({
+          url: data.url,
+          title: data.title || 'Untitled',
+          domain: data.domain || extractDomain(data.url),
+          summary: data.summary,
+          timestamp: data.timestamp,
+          date: new Date(data.timestamp).toISOString().split('T')[0]
+        });
+      } catch (error) {
+        console.error('Error processing cached item for export:', error);
+        // Skip this item and continue
+      }
+    }
+    
+    // Sort by timestamp (most recent first)
+    summaries.sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Format the output based on requested format
+    if (format === 'json') {
+      return JSON.stringify(summaries, null, 2); // Pretty-print JSON
+    } else if (format === 'csv') {
+      // Generate CSV (using semicolons as requested in user preferences)
+      const header = 'Title;URL;Domain;Date;Summary\n';
+      const rows = summaries.map(s => {
+        // Escape quotes in summary and wrap in quotes to handle special characters
+        const escapedSummary = s.summary ? `"${s.summary.replace(/"/g, '""')}"` : '';
+        const escapedTitle = s.title ? `"${s.title.replace(/"/g, '""')}"` : '';
+        return `${escapedTitle};${s.url};${s.domain};${s.date};${escapedSummary}`;
+      }).join('\n');
+      return header + rows;
+    } else {
+      throw new Error(`Unsupported export format: ${format}`);
+    }
+  } catch (error) {
+    console.error('Failed to export cached summaries:', error);
+    throw error;
   }
 }
 
