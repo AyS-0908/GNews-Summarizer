@@ -19,6 +19,15 @@ self.addEventListener('message', async event => {
   if (event.data.action === 'summarizeQueue') {
     // Handle batch summarization request
     const articles = event.data.articles;
+    
+    // Notify client that processing has started
+    if (event.source) {
+      event.source.postMessage({
+        action: 'batchProcessingStarted',
+        totalArticles: articles.length
+      });
+    }
+    
     const results = await processBatchArticles(articles);
     
     // Send results back to the client
@@ -163,9 +172,22 @@ async function processBatchArticles(articles) {
   if (!config) return [];
   
   const results = [];
+  let currentArticle = 0;
+  const clients = await self.clients.matchAll();
   
   for (const article of articles) {
     try {
+      // Update progress
+      currentArticle++;
+      if (clients.length > 0) {
+        clients[0].postMessage({
+          action: 'batchProgress',
+          current: currentArticle,
+          total: articles.length,
+          url: article.url
+        });
+      }
+      
       const summary = await getSummary(article.url, config);
       results.push({
         url: article.url,
@@ -228,8 +250,50 @@ async function handleShare(request) {
        { headers:{'Content-Type':'text/html'} });
   }
 
-  // Standard single summarization flow
+  // Standard single summarization flow with loading indicator
   try {
+    // Return loading state first
+    return new Response(`
+       <!doctype html><html><head><meta charset="utf-8">
+       <title>Generating Summary...</title><style>
+          body{font-family:sans-serif;padding:2rem;line-height:1.4;text-align:center}
+          pre{white-space:pre-wrap}
+          .spinner{width:40px;height:40px;margin:20px auto;border:4px solid rgba(0,0,0,.1);border-radius:50%;border-top-color:#4F46E5;animation:spin 1s ease-in-out infinite}
+          @keyframes spin{to{transform:rotate(360deg)}}
+          .message{margin-top:20px;color:#6b7280}
+       </style>
+       <script>
+         // Auto-refresh to check summary status
+         async function checkSummary() {
+           const url = '${sharedURL}';
+           try {
+             const response = await fetch('./summary-status?url=' + encodeURIComponent(url));
+             if (response.ok) {
+               window.location.reload();
+             } else {
+               setTimeout(checkSummary, 2000);
+             }
+           } catch (e) {
+             setTimeout(checkSummary, 2000);
+           }
+         }
+         // Start polling after page loads
+         setTimeout(() => {
+           const summaryText = document.getElementById('summaryText');
+           if (!summaryText) {
+             fetch('./api/summarize?url=${encodeURIComponent(sharedURL)}')
+               .then(response => window.location.reload())
+               .catch(err => setTimeout(() => window.location.reload(), 3000));
+           }
+         }, 3000);
+       </script>
+       </head><body>
+       <h2>Generating Summary...</h2>
+       <div class="spinner"></div>
+       <p class="message">Analyzing article using AI, please wait...</p>
+       </body></html>`,
+       { headers:{'Content-Type':'text/html'} });
+
     const summaryText = await getSummary(sharedURL, config);
 
     // Simple HTML response shown to the user
@@ -239,8 +303,8 @@ async function handleShare(request) {
           body{font-family:sans-serif;padding:2rem;line-height:1.4}
           pre{white-space:pre-wrap}
        </style></head><body>
-       <h2>✅  Summary ready</h2>
-       <pre>${summaryText}</pre>
+       <h2>✅ Summary ready</h2>
+       <pre id="summaryText">${summaryText}</pre>
        <a href="javascript:history.back()">← Back</a>
        </body></html>`,
        { headers:{'Content-Type':'text/html'} });
