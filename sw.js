@@ -1974,7 +1974,7 @@ async function handleShare(request) {
          // Format time remaining
          function formatTimeRemaining(ms) {
            if (ms <= 0) return 'almost done';
-           if (ms < 10000) return 'just a few seconds';
+           if (ms < 5000) return 'just a few seconds';
            const seconds = Math.floor(ms / 1000);
            return seconds > 60 
              ? \`about \${Math.floor(seconds / 60)} minute\${Math.floor(seconds / 60) > 1 ? 's' : ''}\` 
@@ -2128,7 +2128,7 @@ async function handleShare(request) {
  * @returns {Response} HTML error response
  */
 function createErrorResponse(error) {
-  // Get error information
+  // Get error details
   const errorInfo = error instanceof SummarizerError 
     ? getDetailedErrorInfo(error)
     : {
@@ -2138,50 +2138,41 @@ function createErrorResponse(error) {
         troubleshooting: getTroubleshooting(ErrorType.UNKNOWN)
       };
   
-  // Get the error title and steps
+  // Get error title and generate steps list
   const errorTitle = errorInfo.troubleshooting ? errorInfo.troubleshooting.title : 'Error';
-  const errorSteps = errorInfo.troubleshooting && errorInfo.troubleshooting.steps 
-    ? errorInfo.troubleshooting.steps.map(step => `<li>${step}</li>`).join('')
-    : '';
+  const steps = errorInfo.troubleshooting && errorInfo.troubleshooting.steps || [];
+  const stepsList = steps.map(step => `<li>${step}</li>`).join('');
   
-  // Generate appropriate CSS class based on severity
-  const severityClass = errorInfo.severity || 'critical';
-  
-  // Create a simplified HTML error page
+  // Create simplified HTML response
   return new Response(`
     <!doctype html><html><head><meta charset="utf-8">
-    <title>Error</title><style>
-      body{font-family:sans-serif;padding:2rem;line-height:1.4;max-width:600px;margin:0 auto}
-      .error-container{border-radius:8px;padding:1.5rem;margin-bottom:1rem;background:#fef2f2;border-left:4px solid #ef4444}
-      .error-container.temporary{background:#fff7ed;border-left-color:#f97316}
-      .error-container.fixable{background:#fef2f2;border-left-color:#ef4444}
-      .error-container.critical{background:#fef2f2;border-left-color:#b91c1c}
-      .error-title{margin-top:0;color:#1e293b;font-size:1.3rem}
+    <title>Error</title>
+    <style>
+      body{font-family:sans-serif;padding:2rem;max-width:600px;margin:0 auto}
+      .error-box{border-radius:8px;padding:1.5rem;margin-bottom:1rem;background:#fef2f2;border-left:4px solid #ef4444}
+      .error-title{margin-top:0;font-size:1.3rem}
       .error-message{color:#1f2937}
-      .troubleshooting{background:#f8fafc;border-radius:8px;padding:1rem;margin-bottom:1rem}
-      .troubleshooting h3{margin-top:0;color:#1e293b}
-      .troubleshooting ul{padding-left:1.5rem;color:#4b5563}
-      .troubleshooting li{margin-bottom:0.5rem}
-      .back-link{display:inline-block;margin-top:1rem;color:#4F46E5;text-decoration:none}
-      .back-link:hover{text-decoration:underline}
-      .retry-button{background:#4F46E5;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;cursor:pointer;float:right;margin-top:1rem}
-      .retry-button:hover{background:#4338ca}
-    </style></head>
+      .help{background:#f8fafc;border-radius:8px;padding:1rem;margin-bottom:1rem}
+      .help h3{margin-top:0}
+      .help ul{padding-left:1.5rem}
+      .help li{margin-bottom:0.5rem}
+      .back{display:inline-block;margin-top:1rem;color:#4F46E5;text-decoration:none}
+      .back:hover{text-decoration:underline}
+      .retry{background:#4F46E5;color:white;border:none;padding:0.5rem 1rem;border-radius:4px;cursor:pointer;float:right}
+    </style>
+    </head>
     <body>
       <h2>❌ Error occurred</h2>
-      
-      <div class="error-container ${severityClass}">
+      <div class="error-box">
         <h3 class="error-title">${errorTitle}</h3>
         <p class="error-message">${errorInfo.message}</p>
       </div>
-      
-      <div class="troubleshooting">
+      <div class="help">
         <h3>How to fix this:</h3>
-        <ul>${errorSteps}</ul>
+        <ul>${stepsList}</ul>
       </div>
-      
-      <a class="back-link" href="javascript:history.back()">← Back</a>
-      <button onclick="window.location.reload()" class="retry-button">Try Again</button>
+      <a class="back" href="javascript:history.back()">← Back</a>
+      <button onclick="window.location.reload()" class="retry">Try Again</button>
     </body>
     </html>`,
     { headers:{'Content-Type':'text/html'} }
