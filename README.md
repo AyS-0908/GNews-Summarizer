@@ -50,6 +50,22 @@ The app includes ready-to-use code for:
 - Authentication issues: Provides clear instructions when API keys are invalid
 - Retry capability: Failed summaries can be re-queued with a single click
 
+## API Key Security
+
+To protect your API keys while using this client-side application:
+
+1. **Domain Restriction (Recommended)**: Configure your API keys to only work from this app's domain
+   - For OpenAI: Add domain restriction in the API key settings
+   - For Anthropic: Set "Restrict to one website" when creating the key
+   - For DeepSeek: Add domain restriction during key creation
+
+2. **Security Benefits**:
+   - Even if your API key is somehow exposed, it can't be used from other domains
+   - No backend server needed - zero maintenance cost while maintaining security
+   - Direct API communication for maximum performance
+
+The setup page includes detailed instructions for configuring domain restrictions for each supported AI provider.
+
 ## Troubleshooting
 
 Common issues and solutions:
@@ -59,5 +75,11 @@ Common issues and solutions:
 - **"Network Error"**: Check your internet connection and try again
 - **"Invalid URL"**: Ensure you're sharing from a supported news source
 
-## Note
-Make sure to keep your API keys secure. For best security, configure your API key with domain restrictions to only work from your app's domain.
+## Future Plans
+
+Features planned for upcoming versions:
+
+- Freemium model (50 free summaries, then one-time fee)
+- Google Sheets integration for saving summaries
+- Customizable summary length options
+- Configuration for user-provided AI providers
