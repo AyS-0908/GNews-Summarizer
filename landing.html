@@ -90,6 +90,37 @@
             margin-right: 0.8rem;
         }
 
+        .security-notice {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 10px;
+            padding: 1rem;
+            margin: 1rem 0 2rem;
+            text-align: left;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        .security-notice svg {
+            flex-shrink: 0;
+            color: #3b82f6;
+            margin-top: 0.15rem;
+        }
+
+        .security-notice p {
+            color: #1e40af;
+            margin: 0;
+            font-size: 0.95rem;
+        }
+
+        .security-notice a {
+            color: #2563eb;
+            font-weight: 500;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
         .provider-list {
             display: grid;
             gap: 1.5rem;
@@ -174,6 +205,13 @@
             border: 1px solid #cbd5e1;
             border-radius: 6px;
             font-size: 1rem;
+        }
+
+        .input-group .hint {
+            display: block;
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: #64748b;
         }
 
         .install-button {
@@ -292,6 +330,10 @@
             text-align: left;
         }
 
+        .step-item:last-child {
+            margin-bottom: 0;
+        }
+
         .step-number {
             display: flex;
             align-items: center;
@@ -319,6 +361,36 @@
             color: #64748b;
             margin: 0;
             line-height: 1.5;
+        }
+
+        .step-content code {
+            background: #f1f5f9;
+            border-radius: 4px;
+            padding: 0.15rem 0.3rem;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .security-modal {
+            max-width: 650px;
+        }
+
+        .modal-section {
+            margin-bottom: 1.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .modal-section:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .provider-steps h3 {
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+            color: #1e293b;
         }
 
         .modal-footer {
@@ -378,6 +450,15 @@
             </ul>
         </div>
 
+        <div class="security-notice">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <p>
+                <strong>Enhanced Security:</strong> For maximum security, we recommend restricting your API key to only work from this domain. <a onclick="showSecurityModal()">Learn how to set up domain restrictions</a>
+            </p>
+        </div>
+
         <h2 style="margin-bottom: 1rem; color: #1e293b;">Choose Your AI Provider</h2>
         <p style="color: #64748b; margin-bottom: 2rem;">Select an AI provider and get your API key to start summarizing articles</p>
 
@@ -394,6 +475,7 @@
                     <div class="input-group">
                         <label for="openai-key">API Key</label>
                         <input type="password" id="openai-key" placeholder="sk-...">
+                        <span class="hint">For security, we recommend using a <a onclick="showSecurityModal('openai')">domain-restricted API key</a></span>
                     </div>
                     <div class="input-group">
                         <label for="openai-model">Model</label>
@@ -417,6 +499,7 @@
                     <div class="input-group">
                         <label for="anthropic-key">API Key</label>
                         <input type="password" id="anthropic-key" placeholder="sk-ant-...">
+                        <span class="hint">For security, we recommend using a <a onclick="showSecurityModal('anthropic')">domain-restricted API key</a></span>
                     </div>
                     <div class="input-group">
                         <label for="anthropic-model">Model</label>
@@ -440,6 +523,7 @@
                     <div class="input-group">
                         <label for="deepseek-key">API Key</label>
                         <input type="password" id="deepseek-key" placeholder="API Key...">
+                        <span class="hint">For security, we recommend using a <a onclick="showSecurityModal('deepseek')">domain-restricted API key</a></span>
                     </div>
                 </div>
             </div>
@@ -454,7 +538,7 @@
     <!-- Installation Instructions Modal -->
     <div class="modal-overlay" id="instructionsModal">
         <div class="modal-content">
-            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <button class="modal-close" onclick="closeModal('instructionsModal')">&times;</button>
             <div class="modal-header">
                 <h2>🎉 Setup Complete!</h2>
             </div>
@@ -494,8 +578,118 @@
         </div>
     </div>
 
+    <!-- Security Instructions Modal -->
+    <div class="modal-overlay" id="securityModal">
+        <div class="modal-content security-modal">
+            <button class="modal-close" onclick="closeModal('securityModal')">&times;</button>
+            <div class="modal-header">
+                <h2>🔒 API Key Security</h2>
+            </div>
+            <div class="modal-section">
+                <p style="color: #64748b; margin-bottom: 1rem; line-height: 1.5;">
+                    For enhanced security, we recommend restricting your API key to only work when requests come from this domain. This prevents unauthorized use of your API key even if someone accesses it.
+                </p>
+                <p style="color: #64748b; margin-bottom: 0; line-height: 1.5;">
+                    The app's domain is: <strong id="appDomain" style="color: #1e293b;"></strong>
+                </p>
+            </div>
+            
+            <div class="provider-steps" id="openaiSteps">
+                <h3>OpenAI API Key Restriction</h3>
+                <ol class="step-list">
+                    <li class="step-item">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>Go to API Keys</h3>
+                            <p>Visit <a href="https://platform.openai.com/api-keys" target="_blank">https://platform.openai.com/api-keys</a> and create a new secret key</p>
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>Set Domain Restriction</h3>
+                            <p>After creating the key, click "Add Domain" and enter: <code id="openaiDomain"></code></p>
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>Save the Key</h3>
+                            <p>Click "Save" and paste the key in the app's configuration</p>
+                        </div>
+                    </li>
+                </ol>
+            </div>
+            
+            <div class="provider-steps" id="anthropicSteps">
+                <h3>Anthropic API Key Restriction</h3>
+                <ol class="step-list">
+                    <li class="step-item">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>Go to API Keys</h3>
+                            <p>Visit <a href="https://console.anthropic.com/settings/keys" target="_blank">https://console.anthropic.com/settings/keys</a> and create a new API key</p>
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>Set Website Restriction</h3>
+                            <p>Select "Restrict to one website" and enter: <code id="anthropicDomain"></code></p>
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>Save and Copy</h3>
+                            <p>Create the key and paste it in the app's configuration</p>
+                        </div>
+                    </li>
+                </ol>
+            </div>
+            
+            <div class="provider-steps" id="deepseekSteps">
+                <h3>DeepSeek API Key Restriction</h3>
+                <ol class="step-list">
+                    <li class="step-item">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h3>Go to API Keys</h3>
+                            <p>Visit <a href="https://platform.deepseek.com/api-keys" target="_blank">https://platform.deepseek.com/api-keys</a> and create a new API key</p>
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h3>Set Domain Restriction</h3>
+                            <p>When creating the key, add domain restriction and enter: <code id="deepseekDomain"></code></p>
+                        </div>
+                    </li>
+                    <li class="step-item">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <h3>Save and Copy</h3>
+                            <p>Create the key and paste it in the app's configuration</p>
+                        </div>
+                    </li>
+                </ol>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="understand-button" onclick="closeModal('securityModal')">Got It</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let selectedProvider = null;
+        const appDomain = window.location.hostname || 'ays-0908.github.io';
+        
+        // Fill domain information in the security modal
+        document.getElementById('appDomain').textContent = appDomain;
+        document.getElementById('openaiDomain').textContent = appDomain;
+        document.getElementById('anthropicDomain').textContent = appDomain;
+        document.getElementById('deepseekDomain').textContent = appDomain;
 
         // Check for existing configuration and pre-fill form
         function loadExistingConfig() {
@@ -528,19 +722,45 @@
             }
         }
 
+        // Show the security modal
+        function showSecurityModal(provider) {
+            // Hide all provider sections first
+            document.getElementById('openaiSteps').style.display = 'none';
+            document.getElementById('anthropicSteps').style.display = 'none';
+            document.getElementById('deepseekSteps').style.display = 'none';
+            
+            // Show only the relevant section
+            if (provider) {
+                if (provider === 'openai') {
+                    document.getElementById('openaiSteps').style.display = 'block';
+                } else if (provider === 'anthropic') {
+                    document.getElementById('anthropicSteps').style.display = 'block';
+                } else if (provider === 'deepseek') {
+                    document.getElementById('deepseekSteps').style.display = 'block';
+                }
+            } else {
+                // If no provider specified, show all
+                document.getElementById('openaiSteps').style.display = 'block';
+                document.getElementById('anthropicSteps').style.display = 'block';
+                document.getElementById('deepseekSteps').style.display = 'block';
+            }
+            
+            document.getElementById('securityModal').classList.add('active');
+        }
+
         // Show the instructions modal
         function showModal() {
             document.getElementById('instructionsModal').classList.add('active');
         }
 
-        // Close the modal
-        function closeModal() {
-            document.getElementById('instructionsModal').classList.remove('active');
+        // Close the specified modal
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
         }
 
         // Close modal and redirect to main app
         function closeModalAndRedirect() {
-            closeModal();
+            closeModal('instructionsModal');
             setTimeout(() => {
                 window.location.href = 'index.html';
             }, 500);
@@ -590,7 +810,8 @@
             const config = {
                 provider: selectedProvider,
                 apiKey: apiKey,
-                model: model
+                model: model,
+                domainRestricted: true  // Flag to indicate this is using domain restriction
             };
 
             // Store configuration in localStorage
