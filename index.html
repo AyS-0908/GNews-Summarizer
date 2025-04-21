@@ -279,10 +279,69 @@
     .modal-close:hover {
       color: #1f2937;
     }
+    /* Service worker status indicator */
+    .sw-status {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #f1f5f9;
+      border-radius: 30px;
+      padding: 8px 15px;
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+      z-index: 100;
+      transition: all 0.3s ease;
+    }
+    .sw-status.ready {
+      background: #ecfdf5;
+      color: #047857;
+    }
+    .sw-status.waiting {
+      background: #fff7ed;
+      color: #c2410c;
+    }
+    .sw-status.error {
+      background: #fef2f2;
+      color: #991b1b;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #cbd5e1;
+    }
+    .sw-status.ready .status-dot {
+      background: #10b981;
+    }
+    .sw-status.waiting .status-dot {
+      background: #f97316;
+    }
+    .sw-status.error .status-dot {
+      background: #ef4444;
+    }
+    .sw-status-reload {
+      background: none;
+      border: none;
+      text-decoration: underline;
+      font-size: 0.8rem;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      margin-left: 5px;
+    }
     @media (max-width: 640px) {
       .nav-links {
         flex-direction: column;
         gap: 1rem;
+      }
+      .sw-status {
+        bottom: 10px;
+        right: 10px;
+        padding: 5px 10px;
+        font-size: 0.7rem;
       }
     }
   </style>
@@ -303,7 +362,7 @@
     </label>
     <div id="queueInfo" style="display:none;">
       <p>Queue Mode is ON - Share articles to add them to the queue</p>
-      <button id="summarizeQueueBtn" class="action-button">
+      <button id="summarizeQueueBtn" class="action-button" disabled>
         Summarize Queue (<span id="queueCount">0</span>)
       </button>
     </div>
@@ -313,7 +372,7 @@
   <div class="action-panel">
     <h3>Cache Management</h3>
     <p>Cached summaries load instantly without using your API credits</p>
-    <button id="clearCacheBtn" class="action-button danger">Clear Cached Summaries</button>
+    <button id="clearCacheBtn" class="action-button danger" disabled>Clear Cached Summaries</button>
   </div>
 
   <div id="statusMessage" class="status-message"></div>
@@ -349,6 +408,12 @@
         <button class="action-button secondary" onclick="document.getElementById('cacheModal').style.display='none'">Cancel</button>
       </div>
     </div>
+  </div>
+
+  <!-- Service Worker Status Indicator -->
+  <div class="sw-status" id="swStatus">
+    <span class="status-dot"></span>
+    <span id="swStatusText">Initializing...</span>
   </div>
 
   <!-- Register service-worker and handle configuration -->
@@ -493,6 +558,114 @@
       document.getElementById('totalCount').textContent = total;
     }
 
+    /**
+     * Service Worker status management
+     */
+    let swRegistration = null;
+    let swReady = false;
+    
+    // Update service worker status indicator
+    function updateServiceWorkerStatus(status, message) {
+      const statusElement = document.getElementById('swStatus');
+      const statusTextElement = document.getElementById('swStatusText');
+      
+      statusElement.className = `sw-status ${status}`;
+      statusTextElement.textContent = message;
+      
+      // Enable/disable buttons based on SW status
+      const summarizeBtn = document.getElementById('summarizeQueueBtn');
+      const clearCacheBtn = document.getElementById('clearCacheBtn');
+      
+      if (status === 'ready') {
+        summarizeBtn.disabled = false;
+        clearCacheBtn.disabled = false;
+        // Auto-hide the status indicator after 5 seconds
+        setTimeout(() => {
+          statusElement.style.opacity = '0';
+          setTimeout(() => {
+            statusElement.style.display = 'none';
+          }, 300);
+        }, 5000);
+      } else {
+        summarizeBtn.disabled = true;
+        clearCacheBtn.disabled = true;
+        statusElement.style.display = 'flex';
+        statusElement.style.opacity = '1';
+      }
+    }
+    
+    // Check if service worker is active and ready
+    function checkServiceWorkerStatus() {
+      return new Promise((resolve, reject) => {
+        if (!('serviceWorker' in navigator)) {
+          updateServiceWorkerStatus('error', 'Service Worker not supported');
+          return reject(new Error('Service Worker not supported'));
+        }
+        
+        if (navigator.serviceWorker.controller) {
+          // Service worker is active and controlling the page
+          swReady = true;
+          updateServiceWorkerStatus('ready', 'Service Worker active');
+          resolve(true);
+        } else {
+          // Try to wait for the service worker to activate
+          updateServiceWorkerStatus('waiting', 'Waiting for Service Worker...');
+          
+          // Add reload button to status
+          const statusTextElement = document.getElementById('swStatusText');
+          if (!document.getElementById('swReloadBtn')) {
+            const reloadBtn = document.createElement('button');
+            reloadBtn.id = 'swReloadBtn';
+            reloadBtn.className = 'sw-status-reload';
+            reloadBtn.textContent = 'reload';
+            reloadBtn.onclick = () => window.location.reload();
+            statusTextElement.appendChild(reloadBtn);
+          }
+          
+          // Set a timeout to check again
+          setTimeout(() => {
+            if (navigator.serviceWorker.controller) {
+              swReady = true;
+              updateServiceWorkerStatus('ready', 'Service Worker active');
+              resolve(true);
+            } else {
+              updateServiceWorkerStatus('error', 'Service Worker not active');
+              reject(new Error('Service Worker not active after waiting'));
+            }
+          }, 3000);
+        }
+      });
+    }
+    
+    // Ping service worker to check if it's responsive
+    function pingServiceWorker() {
+      return new Promise((resolve, reject) => {
+        if (!navigator.serviceWorker.controller) {
+          return reject(new Error('No active service worker'));
+        }
+        
+        const messageChannel = new MessageChannel();
+        let timeoutId = null;
+        
+        messageChannel.port1.onmessage = (event) => {
+          if (event.data && event.data.action === 'pong') {
+            clearTimeout(timeoutId);
+            resolve(true);
+          }
+        };
+        
+        // Set timeout to detect unresponsive service worker
+        timeoutId = setTimeout(() => {
+          reject(new Error('Service worker ping timeout'));
+        }, 2000);
+        
+        // Send ping message
+        navigator.serviceWorker.controller.postMessage({
+          action: 'ping'
+        }, [messageChannel.port2]);
+      });
+    }
+
     // Queue mode toggle
     document.getElementById('queueModeToggle').addEventListener('change', (e) => {
       const queue = getQueue();
@@ -514,8 +687,15 @@
         return;
       }
 
-      // Request summaries from service worker
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      try {
+        // Check if service worker is ready
+        const isReady = await checkServiceWorkerStatus();
+        if (!isReady) {
+          showStatus('Service worker not ready. Please refresh the page.', 'error');
+          return;
+        }
+        
+        // Request summaries from service worker
         showStatus('Processing articles...', 'success');
         showProcessingStatus(true);
         updateProgress(0, queue.articles.length);
@@ -524,38 +704,84 @@
           action: 'summarizeQueue',
           articles: queue.articles
         });
-      } else {
-        showStatus('Service worker not ready. Please refresh the page.', 'error');
+      } catch (error) {
+        console.error('Failed to process queue:', error);
+        showStatus('Failed to communicate with service worker. Please refresh the page.', 'error');
       }
     });
     
     // Cache management
-    document.getElementById('clearCacheBtn').addEventListener('click', () => {
-      document.getElementById('cacheModal').style.display = 'flex';
+    document.getElementById('clearCacheBtn').addEventListener('click', async () => {
+      try {
+        // Check if service worker is ready before showing modal
+        const isReady = await checkServiceWorkerStatus();
+        if (!isReady) {
+          showStatus('Service worker not ready. Please refresh the page.', 'error');
+          return;
+        }
+        
+        document.getElementById('cacheModal').style.display = 'flex';
+      } catch (error) {
+        console.error('Failed to prepare cache clear:', error);
+        showStatus('Unable to access cache. Please refresh the page.', 'error');
+      }
     });
     
-    document.getElementById('confirmClearCache').addEventListener('click', () => {
+    document.getElementById('confirmClearCache').addEventListener('click', async () => {
       document.getElementById('cacheModal').style.display = 'none';
       
-      // Send message to service worker to clear cache
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      try {
+        // Check if service worker is ready
+        const isReady = await checkServiceWorkerStatus();
+        if (!isReady) {
+          showStatus('Service worker not ready. Please refresh the page.', 'error');
+          return;
+        }
+        
+        // Send message to service worker to clear cache
         navigator.serviceWorker.controller.postMessage({
           action: 'clearCache'
         });
         showStatus('Clearing cache...', 'success');
-      } else {
-        showStatus('Service worker not ready. Please refresh the page.', 'error');
+      } catch (error) {
+        console.error('Failed to clear cache:', error);
+        showStatus('Failed to communicate with service worker. Please refresh the page.', 'error');
       }
     });
 
     // Service worker setup
     if ('serviceWorker' in navigator) {
+      // Initial status update
+      updateServiceWorkerStatus('waiting', 'Initializing Service Worker...');
+      
+      // Register service worker
       navigator.serviceWorker.register('sw.js')
         .then(registration => {
           console.log('Service Worker registered with scope:', registration.scope);
+          swRegistration = registration;
+          
+          if (navigator.serviceWorker.controller) {
+            // Service worker is already active
+            updateServiceWorkerStatus('ready', 'Service Worker active');
+            swReady = true;
+          } else {
+            // Service worker is still activating
+            updateServiceWorkerStatus('waiting', 'Activating Service Worker...');
+            
+            // Listen for controllerchange event
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              console.log('Service Worker now controlling the page');
+              updateServiceWorkerStatus('ready', 'Service Worker active');
+              swReady = true;
+            });
+          }
+          
+          // Check service worker status again after a delay
+          setTimeout(checkServiceWorkerStatus, 2000);
         })
         .catch(error => {
           console.error('Service Worker registration failed:', error);
+          updateServiceWorkerStatus('error', 'Registration failed');
           showStatus('Failed to initialize offline functionality. Please check your browser settings.', 'error');
         });
       
@@ -660,6 +886,10 @@
           } else {
             showStatus('Failed to clear cache. Please try again.', 'error');
           }
+        } else if (event.data.action === 'pong') {
+          // Pong response received from service worker
+          console.log('Service worker ping successful');
+          updateServiceWorkerStatus('ready', 'Service Worker responsive');
         }
       });
       
@@ -726,7 +956,29 @@
           }
         }
       });
+      
+      // Check service worker status periodically
+      setInterval(async () => {
+        if (swReady) {
+          try {
+            await pingServiceWorker();
+            // If ping successful, service worker is responsive
+          } catch (error) {
+            console.error('Service worker ping failed:', error);
+            swReady = false;
+            updateServiceWorkerStatus('error', 'Service Worker unresponsive');
+          }
+        } else {
+          // Try to check if service worker has become ready
+          try {
+            await checkServiceWorkerStatus();
+          } catch (error) {
+            console.error('Service worker status check failed:', error);
+          }
+        }
+      }, 30000); // Check every 30 seconds
     } else {
+      updateServiceWorkerStatus('error', 'Not supported');
       showStatus('Service Worker not supported in your browser. Some features may not work.', 'error');
     }
   </script>
