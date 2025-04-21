@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Mode - GNews Summarizer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            color: #334155;
+        }
+        
+        .container {
+            max-width: 500px;
+            text-align: center;
+            background: white;
+            padding: 2.5rem;
+            border-radius: 16px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        
+        .offline-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 1.5rem;
+        }
+        
+        h1 {
+            margin-bottom: 1rem;
+            color: #1e293b;
+            font-size: 1.8rem;
+        }
+        
+        p {
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+            color: #64748b;
+        }
+        
+        .note {
+            background: #f8fafc;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            text-align: left;
+            border-left: 3px solid #4F46E5;
+        }
+        
+        .note h2 {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            color: #334155;
+        }
+        
+        .button {
+            display: inline-block;
+            background: #4F46E5;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 500;
+            margin-top: 1rem;
+            transition: background 0.2s;
+        }
+        
+        .button:hover {
+            background: #4338ca;
+        }
+        
+        .cached-link {
+            display: block;
+            margin-top: 1.5rem;
+            color: #4F46E5;
+            text-decoration: underline;
+        }
+        
+        .retry-container {
+            margin-top: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <svg class="offline-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#4F46E5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="1" y1="1" x2="23" y2="23"></line>
+            <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path>
+            <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"></path>
+            <path d="M10.71 5.05A16 16 0 0 1 22.58 9"></path>
+            <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"></path>
+            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+            <line x1="12" y1="20" x2="12.01" y2="20"></line>
+        </svg>
+        
+        <h1>You're offline</h1>
+        <p>But don't worry! You can still view your previously cached summaries.</p>
+        
+        <div class="note">
+            <h2>Did you know?</h2>
+            <p>GNews Summarizer keeps your previously viewed summaries in the cache, so you can access them even when you're offline.</p>
+        </div>
+        
+        <a href="index.html" class="button">View Cached Summaries</a>
+        
+        <div class="retry-container">
+            <p>Connection lost? Check your internet and try again.</p>
+            <button onclick="window.location.reload()" class="button">Retry Connection</button>
+        </div>
+    </div>
+    
+    <script>
+        // Check if we're back online
+        window.addEventListener('online', () => {
+            window.location.href = 'index.html';
+        });
+    </script>
+</body>
+</html>
