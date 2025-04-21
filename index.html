@@ -149,6 +149,14 @@
       background: #fef2f2;
       color: #991b1b;
     }
+    .status-message.warning {
+      background: #fff7ed;
+      color: #c2410c;
+    }
+    .status-message.info {
+      background: #eff6ff;
+      color: #1e40af;
+    }
     .error-item {
       border-left: 4px solid #ef4444;
     }
@@ -158,6 +166,63 @@
       border-radius: 4px;
       margin: 1rem 0;
       color: #991b1b;
+    }
+    .error-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.5rem;
+    }
+    .error-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin: 0;
+    }
+    .error-badge {
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 9999px;
+      color: white;
+      margin-left: 0.5rem;
+    }
+    .error-badge.temporary {
+      background: #f97316;
+    }
+    .error-badge.fixable {
+      background: #ef4444;
+    }
+    .error-badge.critical {
+      background: #b91c1c;
+    }
+    .troubleshooting {
+      background: #f8fafc;
+      padding: 1rem;
+      border-radius: 4px;
+      margin-top: 0.5rem;
+      color: #4b5563;
+    }
+    .troubleshooting h4 {
+      font-size: 0.9rem;
+      margin: 0 0 0.5rem 0;
+      color: #1e293b;
+    }
+    .troubleshooting ul {
+      margin: 0;
+      padding-left: 1.5rem;
+      font-size: 0.9rem;
+    }
+    .troubleshooting li {
+      margin-bottom: 0.3rem;
+    }
+    .toggle-troubleshooting {
+      background: none;
+      border: none;
+      color: #4F46E5;
+      font-size: 0.8rem;
+      cursor: pointer;
+      padding: 0;
+      margin-top: 0.5rem;
+      text-decoration: underline;
     }
     .retry-button {
       background: #4F46E5;
@@ -219,6 +284,14 @@
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
+    @keyframes pulse {
+      0% {opacity: 0.6}
+      50% {opacity: 1}
+      100% {opacity: 0.6}
+    }
+    .pulse {
+      animation: pulse 2s infinite ease-in-out;
+    }
     #processingStatus {
       display: none;
       padding: 1.5rem;
@@ -245,6 +318,32 @@
       color: #6b7280;
       margin-top: 0.5rem;
       word-break: break-all;
+    }
+    .progress-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.8rem;
+      color: #6b7280;
+      margin-bottom: 0.5rem;
+    }
+    .progress-phase {
+      display: flex;
+      align-items: center;
+    }
+    .progress-phase-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4F46E5;
+      margin-right: 6px;
+      opacity: 0.7;
+    }
+    .progress-phase-text {
+      font-weight: 500;
+    }
+    .progress-time {
+      font-style: italic;
     }
     /* Modal for cache management */
     .modal {
@@ -384,6 +483,15 @@
     <div class="progress-container">
       <div class="progress-bar" id="progressBar"></div>
     </div>
+    <div class="progress-info">
+      <div class="progress-phase">
+        <div class="progress-phase-dot pulse"></div>
+        <span class="progress-phase-text" id="progressPhase">Initializing</span>
+      </div>
+      <div class="progress-time" id="progressTimeContainer">
+        <span id="progressTime">Estimating time...</span>
+      </div>
+    </div>
     <p>Processing article <span id="currentCount">0</span> of <span id="totalCount">0</span></p>
     <p class="current-article" id="currentArticle"></p>
   </div>
@@ -517,19 +625,26 @@
       updateQueueUI();
     }
 
-    function showStatus(message, type, duration = 3000) {
+    /**
+     * Show a status message to the user
+     * @param {string} message - Message to display
+     * @param {string} type - Message type: 'success', 'error', 'warning', 'info'
+     * @param {number} duration - Duration in ms (0 for persistent)
+     * @param {boolean} showCloseButton - Whether to show a close button
+     */
+    function showStatus(message, type, duration = 3000, showCloseButton = true) {
       const statusElement = document.getElementById('statusMessage');
       statusElement.textContent = message;
       statusElement.className = `status-message ${type}`;
       statusElement.style.display = 'block';
       
-      // Only auto-hide success messages, keep errors visible
-      if (type === 'success' && duration > 0) {
+      // Only auto-hide non-error messages, keep errors visible unless explicitly set
+      if (type !== 'error' && duration > 0) {
         setTimeout(() => {
           statusElement.style.display = 'none';
         }, duration);
-      } else if (type === 'error') {
-        // Add close button for errors
+      } else if (showCloseButton) {
+        // Add close button
         const closeBtn = document.createElement('button');
         closeBtn.textContent = '\u00d7';
         closeBtn.style.float = 'right';
@@ -544,6 +659,42 @@
       }
     }
     
+    /**
+     * Format a time duration in milliseconds to a human-readable string
+     * @param {number} ms - Time in milliseconds
+     * @returns {string} Formatted time string
+     */
+    function formatTimeRemaining(ms) {
+      if (ms <= 0) return 'almost done';
+      if (ms < 5000) return 'just a few seconds';
+      
+      const seconds = Math.floor(ms / 1000);
+      if (seconds < 60) {
+        return `about ${seconds} seconds`;
+      } else {
+        const minutes = Math.floor(seconds / 60);
+        return `about ${minutes} minute${minutes > 1 ? 's' : ''}`;
+      }
+    }
+    
+    /**
+     * Format progress phase to human-readable text
+     * @param {string} phase - Progress phase identifier
+     * @returns {string} Human-readable phase description
+     */
+    function formatPhase(phase) {
+      const phases = {
+        'initializing': 'Preparing',
+        'connecting': 'Connecting to AI',
+        'sending-request': 'Sending request',
+        'processing': 'AI is analyzing',
+        'receiving-response': 'Receiving summary',
+        'finalizing': 'Finalizing',
+        'complete': 'Completed'
+      };
+      return phases[phase] || phase;
+    }
+    
     // Show processing status
     function showProcessingStatus(show) {
       document.getElementById('processingStatus').style.display = show ? 'block' : 'none';
@@ -551,11 +702,27 @@
     }
     
     // Update progress bar
-    function updateProgress(current, total) {
+    function updateProgress(current, total, progress = null) {
+      // Calculate percentage for overall progress
       const percentage = (current / total) * 100;
       document.getElementById('progressBar').style.width = `${percentage}%`;
       document.getElementById('currentCount').textContent = current;
       document.getElementById('totalCount').textContent = total;
+      
+      // If we have progress details for the current article, show them
+      if (progress) {
+        document.getElementById('progressPhase').textContent = formatPhase(progress.phase);
+        
+        const timeContainer = document.getElementById('progressTimeContainer');
+        const timeElement = document.getElementById('progressTime');
+        
+        if (progress.estimatedTimeRemaining > 0) {
+          timeElement.textContent = formatTimeRemaining(progress.estimatedTimeRemaining);
+          timeContainer.style.display = 'block';
+        } else {
+          timeContainer.style.display = 'none';
+        }
+      }
     }
 
     /**
@@ -665,6 +832,69 @@
         }, [messageChannel.port2]);
       });
     }
+
+    /**
+     * Creates an enhanced error element with troubleshooting information
+     * @param {Object} result - The error result object
+     * @param {number} index - Result index
+     * @param {string} url - The article URL
+     * @returns {HTMLElement} The error element
+     */
+    function createErrorElement(result, index, url) {
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'summary-item error-item';
+      
+      // Create error severity badge
+      const severityBadge = result.severity ? 
+        `<span class="error-badge ${result.severity}">${result.severity}</span>` : '';
+      
+      // Create troubleshooting content
+      let troubleshootingContent = '';
+      if (result.troubleshooting) {
+        const steps = result.troubleshooting.steps || [];
+        const stepsList = steps.map(step => `<li>${step}</li>`).join('');
+        
+        troubleshootingContent = `
+          <div class="troubleshooting" id="troubleshooting-${index}" style="display:none;">
+            <h4>How to fix this:</h4>
+            <ul>${stepsList}</ul>
+          </div>
+          <button class="toggle-troubleshooting" onclick="toggleTroubleshooting(${index})">
+            Show troubleshooting
+          </button>
+        `;
+      }
+      
+      errorDiv.innerHTML = `
+        <div class="error-header">
+          <h3>Article ${index + 1} - Failed</h3>
+          ${severityBadge}
+        </div>
+        <a href="${url}" target="_blank">${url}</a>
+        <div class="error-message">${result.summary}</div>
+        ${troubleshootingContent}
+        <button class="retry-button" data-url="${url}">Try Again</button>
+      `;
+      
+      return errorDiv;
+    }
+    
+    /**
+     * Toggle troubleshooting visibility
+     * @param {number} index - Result index
+     */
+    window.toggleTroubleshooting = function(index) {
+      const troubleshooting = document.getElementById(`troubleshooting-${index}`);
+      const button = troubleshooting.nextElementSibling;
+      
+      if (troubleshooting.style.display === 'none') {
+        troubleshooting.style.display = 'block';
+        button.textContent = 'Hide troubleshooting';
+      } else {
+        troubleshooting.style.display = 'none';
+        button.textContent = 'Show troubleshooting';
+      }
+    };
 
     // Queue mode toggle
     document.getElementById('queueModeToggle').addEventListener('change', (e) => {
@@ -830,6 +1060,18 @@
           // Update progress indicator
           updateProgress(event.data.current, event.data.total);
           document.getElementById('currentArticle').textContent = event.data.url;
+        } else if (event.data.action === 'summaryProgress') {
+          // Handle single summary progress update
+          if (event.data.progress) {
+            // Update current article progress info if we're in batch mode
+            if (document.getElementById('processingStatus').style.display === 'block') {
+              updateProgress(
+                parseInt(document.getElementById('currentCount').textContent),
+                parseInt(document.getElementById('totalCount').textContent),
+                event.data.progress
+              );
+            }
+          }
         } else if (event.data.action === 'batchSummaryComplete') {
           // Hide processing status
           showProcessingStatus(false);
@@ -842,25 +1084,22 @@
           const hasErrors = event.data.results && event.data.results.some(result => !result.success);
           
           if (hasErrors) {
-            showStatus('Some articles couldn\'t be summarized. See details below.', 'error', 0);
+            showStatus('Some articles couldn\'t be summarized. See details below.', 'warning', 0);
           } else {
             showStatus('All summaries generated successfully!', 'success');
           }
           
           if (event.data.results && event.data.results.length > 0) {
             event.data.results.forEach((result, index) => {
-              const summaryDiv = document.createElement('div');
-              summaryDiv.className = result.success ? 'summary-item' : 'summary-item error-item';
-              
-              // Add error styling if needed
               if (!result.success) {
-                summaryDiv.innerHTML = `
-                  <h3>Article ${index + 1} - Failed</h3>
-                  <a href="${result.url}" target="_blank">${result.url}</a>
-                  <div class="error-message">${result.summary}</div>
-                  <button class="retry-button" data-url="${result.url}">Try Again</button>
-                `;
+                // Create enhanced error display with troubleshooting
+                const errorDiv = createErrorElement(result, index, result.url);
+                resultsDiv.appendChild(errorDiv);
               } else {
+                // Success case - standard summary display
+                const summaryDiv = document.createElement('div');
+                summaryDiv.className = 'summary-item';
+                
                 // If it came from cache, show a badge
                 const cacheBadge = result.fromCache ? 
                   '<span class="cache-badge">From Cache</span>' : '';
@@ -870,8 +1109,8 @@
                   <a href="${result.url}" target="_blank">${result.url}</a>
                   <pre>${result.summary}</pre>
                 `;
+                resultsDiv.appendChild(summaryDiv);
               }
-              resultsDiv.appendChild(summaryDiv);
             });
             
             // Clear queue after processing
@@ -879,6 +1118,19 @@
             queue.articles = [];
             saveQueue(queue);
             updateQueueUI();
+          }
+        } else if (event.data.action === 'rateLimitReached') {
+          // Handle rate limit reached during batch processing
+          showStatus('Rate limit reached. Some articles were not processed.', 'warning', 0);
+          
+          // Re-add unprocessed articles to queue
+          if (event.data.remainingArticles && event.data.remainingArticles.length > 0) {
+            const queue = getQueue();
+            queue.articles = [...queue.articles, ...event.data.remainingArticles];
+            saveQueue(queue);
+            updateQueueUI();
+            
+            showStatus(`${event.data.remainingArticles.length} articles re-added to queue for later processing.`, 'info', 5000);
           }
         } else if (event.data.action === 'cacheClearedResult') {
           if (event.data.success) {
@@ -952,7 +1204,12 @@
             saveQueue(queue);
             updateQueueUI();
             showStatus('Article added back to queue for retry', 'success');
-            event.target.parentElement.remove();
+            
+            // Remove the error item
+            const errorItem = event.target.closest('.error-item');
+            if (errorItem) {
+              errorItem.remove();
+            }
           }
         }
       });
